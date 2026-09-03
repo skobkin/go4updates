@@ -1,0 +1,4 @@
+# Local Go workspace files are intentionally kept out of version control.
+# See the "Local multi-module development" section of README.md.
+go.work
+go.work.sum
