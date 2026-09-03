@@ -361,6 +361,83 @@ func TestFetchPrereleaseFiltering(t *testing.T) {
 	}
 }
 
+func TestFetchClassifiesSemverPrereleaseTags(t *testing.T) {
+	// The GitLab release API has no pre-release flag, so the state must be
+	// derived from the tag: otherwise a candidate such as v2.0.0-rc.1 would
+	// survive the default pre-release filter and be reported as the newest
+	// release. A leading "v" is optional.
+	rec := newRecordingServer(t, []releaseDTO{
+		releaseDTOFor("v2.0.0-rc.1", time.Hour),
+		releaseDTOFor("1.9.0-beta.2", 2*time.Hour),
+		releaseDTOFor("v1.8.0", 3*time.Hour),
+	})
+	source := newTestSource(rec)
+
+	feed, err := source.Fetch(context.Background(), updates.FetchOptions{})
+	if err != nil {
+		t.Fatalf("Fetch returned error: %v", err)
+	}
+
+	if len(feed.Releases) != 1 || feed.Releases[0].Version != "v1.8.0" {
+		t.Fatalf("semver pre-release tags must be excluded by default: %v", feed.Releases)
+	}
+
+	if feed.Releases[0].Prerelease {
+		t.Error("stable release must not be marked as a pre-release")
+	}
+
+	rec2 := newRecordingServer(t, []releaseDTO{
+		releaseDTOFor("v2.0.0-rc.1", time.Hour),
+		releaseDTOFor("1.9.0-beta.2", 2*time.Hour),
+		releaseDTOFor("v1.8.0", 3*time.Hour),
+	})
+	source2 := newTestSource(rec2)
+
+	feed, err = source2.Fetch(context.Background(), updates.FetchOptions{IncludePrereleases: true})
+	if err != nil {
+		t.Fatalf("Fetch returned error: %v", err)
+	}
+
+	if len(feed.Releases) != 3 {
+		t.Fatalf("len(releases) = %d, want 3 with IncludePrereleases", len(feed.Releases))
+	}
+
+	for _, release := range feed.Releases {
+		if release.Version == "v1.8.0" {
+			if release.Prerelease {
+				t.Error("stable release must not be marked as a pre-release")
+			}
+
+			continue
+		}
+
+		if !release.Prerelease {
+			t.Errorf("release %q must be marked as a pre-release", release.Version)
+		}
+	}
+}
+
+func TestHasSemverPrerelease(t *testing.T) {
+	tests := map[string]bool{
+		"v2.0.0-rc.1":     true,
+		"2.0.0-beta.2":    true,
+		"v1.0.0-alpha":    true,
+		"v1.0.0":          false,
+		"1.2.3":           false,
+		"v1.2":            false,
+		"release":         false,
+		"release-1.2.3":   false,
+		"":                false,
+		"   v1.0.0-rc.1 ": true,
+	}
+
+	for tag, want := range tests {
+		if got := hasSemverPrerelease(tag); got != want {
+			t.Errorf("hasSemverPrerelease(%q) = %v, want %v", tag, got, want)
+		}
+	}
+}
+
 func TestFetchPaginatesUntilLimitSatisfied(t *testing.T) {
 	// Two pages: the first is full of upcoming releases, so pagination must
 	// continue until the eligible limit is satisfied.

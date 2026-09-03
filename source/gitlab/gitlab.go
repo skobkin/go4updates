@@ -9,7 +9,10 @@
 // mapped assets carry only a name and a URL. GitLab also has no draft state: a
 // release whose released_at lies in the future is reported as an upcoming
 // release, and upcoming releases are dropped during conversion so they can
-// never be mistaken for the newest published version.
+// never be mistaken for the newest published version. The release API carries
+// no pre-release flag either, so a tag whose version has a semantic-version
+// pre-release suffix, such as v2.0.0-rc.1, is classified as a pre-release from
+// the tag itself.
 package gitlab
 
 import (
@@ -25,6 +28,7 @@ import (
 
 	updates "github.com/skobkin/go4updates"
 	"github.com/skobkin/go4updates/internal/fetch"
+	"golang.org/x/mod/semver"
 )
 
 const (
@@ -237,7 +241,7 @@ func (s *Source) convertRelease(dto releaseDTO) (updates.Release, bool) {
 		Body:        dto.Description,
 		URL:         s.releaseLink(dto),
 		PublishedAt: dto.publishedAt(),
-		Prerelease:  dto.Prerelease,
+		Prerelease:  dto.isPrerelease(),
 	}
 
 	for _, link := range dto.Assets.Links {
@@ -348,6 +352,35 @@ type releaseDTO struct {
 
 	Links  releaseLinksDTO `json:"_links"`
 	Assets assetsDTO       `json:"assets"`
+}
+
+// isPrerelease reports whether the release must be treated as a pre-release.
+//
+// Because the GitLab release API documents no pre-release flag, a tag whose
+// version carries a semantic-version pre-release suffix, such as
+// "v2.0.0-rc.1", is classified from the tag itself; without that, a candidate
+// release would survive the default pre-release filter and be reported as the
+// newest version. An explicit flag returned by a deployment that has one is
+// still honored.
+func (r releaseDTO) isPrerelease() bool {
+	return r.Prerelease || hasSemverPrerelease(r.TagName)
+}
+
+// hasSemverPrerelease reports whether tag is a semantic version with a
+// pre-release suffix. A leading "v" is optional, matching how the default
+// comparator reads versions. Tags that are not semantic versions are never
+// classified as pre-releases.
+func hasSemverPrerelease(tag string) bool {
+	version := strings.TrimSpace(tag)
+	if version == "" {
+		return false
+	}
+
+	if !strings.HasPrefix(version, "v") {
+		version = "v" + version
+	}
+
+	return semver.Prerelease(version) != ""
 }
 
 // upcoming reports whether the release is only planned for the future.
