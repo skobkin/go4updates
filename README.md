@@ -250,8 +250,19 @@ own comparator:
 type BuildNumberComparator struct{}
 
 func (BuildNumberComparator) Compare(current, latest string) updates.Status {
-    // Application-specific comparison.
-    // Return StatusUnknown when values cannot be compared.
+    currentBuild, currentErr := strconv.Atoi(strings.TrimSpace(current))
+    latestBuild, latestErr := strconv.Atoi(strings.TrimSpace(latest))
+
+    // Build numbers that are missing or unreadable cannot be ordered.
+    if currentErr != nil || latestErr != nil || currentBuild == latestBuild {
+        return updates.StatusUnknown
+    }
+
+    if currentBuild < latestBuild {
+        return updates.StatusUpdateAvailable
+    }
+
+    return updates.StatusUpToDate
 }
 
 result, err := checker.Check(ctx, updates.Target{
