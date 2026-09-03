@@ -3,6 +3,7 @@ package fetch
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -143,27 +144,33 @@ func TestPaginateStopsAtLimit(t *testing.T) {
 	}
 }
 
-func TestPaginateRequestsRemainingNeedPerPage(t *testing.T) {
+func TestPaginateKeepsPageSizeStable(t *testing.T) {
+	// A full first page that loses items to filtering must not shrink the
+	// page size of the next request: numbered pagination locates items
+	// through page number and page size together, so a shrinking size would
+	// re-fetch items the first page already returned and hide older
+	// releases behind the duplicates.
 	server := newPageServer(
 		pageSpec{versions: []string{"v1.4.0", draftVersion, "v1.3.0"}, ages: []time.Duration{time.Hour, 2 * time.Hour, 3 * time.Hour}},
-		pageSpec{versions: []string{"v1.2.0"}},
+		pageSpec{versions: []string{"v1.2.0", "v1.1.0"}, ages: []time.Duration{4 * time.Hour, 5 * time.Hour}},
 	)
 
-	releases, err := Paginate(context.Background(), 3, 100, server.fetchPage, convertDroppingDrafts, false)
+	releases, err := Paginate(context.Background(), 4, 3, server.fetchPage, convertDroppingDrafts, false)
 	if err != nil {
 		t.Fatalf("Paginate returned error: %v", err)
-	}
-
-	if len(releases) != 3 {
-		t.Fatalf("len(releases) = %d, want 3", len(releases))
 	}
 
 	if len(server.calls) != 2 {
 		t.Fatalf("made %d requests, want 2", len(server.calls))
 	}
 
-	if server.calls[1] != 1 {
-		t.Errorf("second request perPage = %d, want 1 (remaining need after filtering)", server.calls[1])
+	if server.calls[0] != 3 || server.calls[1] != 3 {
+		t.Errorf("page sizes = %v, want the constant min(limit, maxPerPage) = 3 on every page", server.calls)
+	}
+
+	want := []string{"v1.4.0", "v1.3.0", "v1.2.0", "v1.1.0"}
+	if got := versions(releases); !slices.Equal(got, want) {
+		t.Errorf("releases = %v, want %v without duplicates", got, want)
 	}
 }
 
