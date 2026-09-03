@@ -30,8 +30,8 @@ type Options struct {
 // rewritten into links through opts.Linker; a hash is shortened to its first
 // ten characters when opts.ShortCommitSHA is set, with or without a Linker.
 // Everything else is left as it is: fenced code blocks, inline code spans,
-// links, images, autolinks, and link reference definitions are never
-// modified, so the raw document structure survives. Links and images include
+// links, images, autolinks, raw HTML tags, and link reference definitions are
+// never modified, so the raw document structure survives. Links and images include
 // the inline "[text](destination)" form as well as the reference forms
 // "[text][label]", "[label][]", and "[label]" for labels the document
 // defines.
@@ -410,7 +410,7 @@ func protectedSpanAt(line string, i int, labels map[string]struct{}) (span, bool
 		}
 
 	case '<':
-		if end := autolinkEnd(line, i); end > i {
+		if end := angleSpanEnd(line, i); end > i {
 			return span{start: i, end: end}, true
 		}
 
@@ -523,21 +523,42 @@ func backtickRun(line string, i int) int {
 	return n
 }
 
-// autolinkEnd returns the end of an angle bracket autolink or inline tag
-// starting at i, or i when the brackets are not closed on the same line
-// without whitespace in between.
-func autolinkEnd(line string, i int) int {
-	for j := i + 1; j < len(line); j++ {
+// angleSpanEnd returns the end of the angle bracket construct starting at i,
+// or i when the line does not hold one.
+//
+// Autolinks ("<https://example.com>") and raw HTML tags
+// ("<span data-rev=\"...\">") are protected through their closing bracket,
+// attributes included, so transforms never rewrite content inside them. A tag
+// name must follow the opening bracket directly, so plain text such as
+// "a < b and c > d" stays transformable, and a second '<' before the closing
+// bracket leaves the span unprotected.
+func angleSpanEnd(line string, i int) int {
+	j := i + 1
+
+	if j < len(line) && line[j] == '/' {
+		j++
+	}
+
+	if j >= len(line) || !isASCIILetter(line[j]) {
+		return i
+	}
+
+	for ; j < len(line); j++ {
 		switch line[j] {
 		case '>':
 			return j + 1
 
-		case '<', ' ', '\t':
+		case '<':
 			return i
 		}
 	}
 
 	return i
+}
+
+// isASCIILetter reports whether b is an ASCII letter.
+func isASCIILetter(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
 }
 
 // bracketEnd returns the position of the "]" closing the bracket opened at i,

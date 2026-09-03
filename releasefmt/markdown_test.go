@@ -602,9 +602,14 @@ func TestMarkdownBodyScannerEdges(t *testing.T) {
 		want string
 	}{
 		{
-			name: "nested angle brackets still protect the text",
+			name: "a bracket construct that is not a tag stays transformable",
 			body: "see <a <" + testSHA + "> here",
-			want: "see <a <" + testSHA + "> here",
+			want: "see <a <" + shortLink + "> here",
+		},
+		{
+			name: "a letter-leading construct after an abort is protected",
+			body: "see <a <span data-rev=\"" + testSHA + "\"> here",
+			want: "see <a <span data-rev=\"" + testSHA + "\"> here",
 		},
 		{
 			name: "unclosed angle bracket does not protect the rest",
@@ -612,9 +617,9 @@ func TestMarkdownBodyScannerEdges(t *testing.T) {
 			want: "<" + shortLink,
 		},
 		{
-			name: "whitespace inside angle brackets does not protect",
+			name: "whitespace inside angle brackets stays protected",
 			body: "<see " + testSHA + " now>",
-			want: "<see " + shortLink + " now>",
+			want: "<see " + testSHA + " now>",
 		},
 		{
 			name: "unclosed link destination does not protect",
@@ -652,9 +657,9 @@ func TestMarkdownBodyScannerEdges(t *testing.T) {
 			want: "    ```\n" + shortLink,
 		},
 		{
-			name: "tab inside angle brackets does not protect",
+			name: "tab inside angle brackets stays protected",
 			body: "<a\t" + testSHA + ">",
-			want: "<a\t" + shortLink + ">",
+			want: "<a\t" + testSHA + ">",
 		},
 		{
 			name: "unclosed outer bracket is not a link",
@@ -745,6 +750,63 @@ func TestMarkdownBodyReferenceLinks(t *testing.T) {
 
 	if once != twice {
 		t.Errorf("MarkdownBody is not idempotent:\nfirst:\n%s\nsecond:\n%s", once, twice)
+	}
+}
+
+func TestMarkdownBodyHTMLTags(t *testing.T) {
+	opts := Options{Linker: testGitHubLinker(), ShortCommitSHA: true}
+
+	shortLink := "[" + testShortSHA + "](" + testCommitURL + ")"
+
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "hash inside a tag attribute is untouched",
+			body: "<span data-rev=\"" + testSHA + "\">v1.0.0</span> by @alice",
+			want: "<span data-rev=\"" + testSHA + "\">v1.0.0</span> by " + testMentionLink("alice"),
+		},
+		{
+			name: "hash inside a self-described tag is untouched",
+			body: "<img alt=\"" + testSHA + "\" src=\"https://example.com/b.png\">",
+			want: "<img alt=\"" + testSHA + "\" src=\"https://example.com/b.png\">",
+		},
+		{
+			name: "closing tag is protected",
+			body: "done</br>commit " + testSHA,
+			want: "done</br>commit " + shortLink,
+		},
+		{
+			name: "comparison operators stay transformable",
+			body: "1 < 2 and 3 > 1, fixes #12",
+			want: "1 < 2 and 3 > 1, fixes " + testIssueLink("12"),
+		},
+		{
+			name: "non-letter after the bracket is not a tag",
+			body: "<3 hearts, commit " + testSHA,
+			want: "<3 hearts, commit " + shortLink,
+		},
+		{
+			name: "second opening bracket aborts protection",
+			body: "see <a <span data-rev=\"" + testSHA + "\"> here",
+			want: "see <a <span data-rev=\"" + testSHA + "\"> here",
+		},
+		{
+			name: "unclosed tag does not protect the rest of the line",
+			body: "<span data-rev=\"" + testSHA,
+			want: "<span data-rev=\"" + shortLink,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := MarkdownBody(tt.body, opts)
+			if got != tt.want {
+				t.Errorf("MarkdownBody() =\n%q\nwant\n%q", got, tt.want)
+			}
+		})
 	}
 }
 
