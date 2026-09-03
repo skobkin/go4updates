@@ -15,10 +15,6 @@ The root module intentionally does **not** depend on Fyne or another UI framewor
 UI integrations live in separate nested Go modules, so a headless service or TUI
 can use the core library without pulling GUI dependencies into its module graph.
 
-> **Project status:** the initial public API is being implemented. The examples
-> below describe the intended v0.1 API and should be kept synchronized with the
-> implementation.
-
 ## Design
 
 The library separates responsibilities into small layers:
@@ -321,9 +317,17 @@ import (
     fyneupdate "github.com/skobkin/go4updates/ui/fyne/update"
 )
 
+// ShowDialog creates and shows the dialog in one call.
+fyneupdate.ShowDialog(window, result, fyneupdate.Options{})
+
+// NewDialog returns the dialog instead, for custom presentation.
 d := fyneupdate.NewDialog(window, result, fyneupdate.Options{})
 d.Show()
 ```
+
+The dialog renders the changelog through `releasefmt` and the generic Markdown
+renderer, so its presentation is customizable through `Options.Format` and
+`Options.Markdown`.
 
 The generic Fyne Markdown renderer is available separately under
 `ui/fyne/markdown`, so applications can reuse it without using the update dialog.

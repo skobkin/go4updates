@@ -80,6 +80,10 @@ Future UI integrations may use sibling nested modules such as `ui/charm` or
 - The root module must never depend on `github.com/skobkin/go4updates/ui/fyne`.
 - The root module must never acquire Fyne transitively.
 - Nested UI modules may depend on the root module.
+- Nested modules must not be released while their `go.mod` contains filesystem
+  `replace` directives pointing at sibling modules. Before tagging a nested
+  module release, point the dependency at its published version and remove the
+  replace directive.
 - Keep provider adapters dependency-light; prefer direct HTTP APIs over pulling
   large GitHub/GitLab/Gitea SDKs into the root module.
 - Before adding a dependency, check whether the standard library or an existing
