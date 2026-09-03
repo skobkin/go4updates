@@ -136,34 +136,47 @@ type Watcher struct {
 	seq      uint64
 }
 
-// ticker is the timer a target worker schedules its checks with.
+// ticker is the timer a target worker spaces its checks with. The watcher
+// re-arms it after every completed attempt, so the wait before the next check
+// is always a full interval instead of the leftover phase of a periodic
+// schedule.
 type ticker interface {
-	// C returns the stream of ticks.
+	// C returns the stream carrying one signal per scheduled interval.
 	C() <-chan time.Time
 
-	// Stop releases the ticker.
+	// Reset re-arms the timer to signal once after d, dropping a signal
+	// that was pending.
+	Reset(d time.Duration)
+
+	// Stop releases the timer.
 	Stop()
 }
 
-// realTicker adapts time.Ticker to the ticker interface.
+// realTicker adapts time.Timer to the ticker interface.
 type realTicker struct {
-	ticker *time.Ticker
+	timer *time.Timer
 }
 
-// newRealTicker creates a time.Ticker based ticker. The duration is always
+// newRealTicker creates a time.Timer based ticker. The duration is always
 // positive: the watcher resolves intervals at use time.
 func newRealTicker(d time.Duration) ticker {
-	return &realTicker{ticker: time.NewTicker(d)}
+	return &realTicker{timer: time.NewTimer(d)}
 }
 
-// C returns the stream of ticks.
+// C returns the stream carrying one signal per scheduled interval.
 func (t *realTicker) C() <-chan time.Time {
-	return t.ticker.C
+	return t.timer.C
 }
 
-// Stop releases the ticker.
+// Reset re-arms the timer to signal once after d, dropping a signal that was
+// pending.
+func (t *realTicker) Reset(d time.Duration) {
+	t.timer.Reset(d)
+}
+
+// Stop releases the timer.
 func (t *realTicker) Stop() {
-	t.ticker.Stop()
+	t.timer.Stop()
 }
 
 // New creates a Watcher that checks targets with checker.
@@ -288,11 +301,11 @@ func (w *Watcher) watchTarget(ctx context.Context, target watchedTarget) {
 	}
 
 	for {
-		// Ticks that fired while the previous attempt was running are
-		// dropped: the next wait is a full interval measured after the
-		// attempt, so a check that outlasts its interval is never followed
-		// by an immediate re-check of a slow source.
-		drainTicker(scheduler)
+		// The scheduler is re-armed after every completed attempt: the wait
+		// before the next check is always a full interval, never the
+		// leftover phase of a periodic schedule, and a signal that fired
+		// while the attempt was running is dropped.
+		scheduler.Reset(w.intervalFor(target))
 
 		select {
 		case <-ctx.Done():
@@ -300,22 +313,6 @@ func (w *Watcher) watchTarget(ctx context.Context, target watchedTarget) {
 
 		case <-scheduler.C():
 			w.attempt(ctx, target)
-		}
-	}
-}
-
-// drainTicker discards the ticks a ticker delivered while the last attempt was
-// running.
-func drainTicker(t ticker) {
-	for {
-		select {
-		case _, ok := <-t.C():
-			if !ok {
-				return
-			}
-
-		default:
-			return
 		}
 	}
 }

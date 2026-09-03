@@ -116,14 +116,36 @@ func testFeed(versions ...string) updates.Feed {
 	}
 }
 
-// fakeTicker is a manually driven replacement for time.Ticker.
+// fakeTicker is a manually driven replacement for the timer the watcher
+// schedules itself with.
 type fakeTicker struct {
-	c    chan time.Time
-	stop sync.Once
+	c      chan time.Time
+	stop   sync.Once
+	resets atomic.Int32
 }
 
 func (t *fakeTicker) C() <-chan time.Time {
 	return t.c
+}
+
+// Reset re-arms the timer and drops a tick that is still buffered, mirroring
+// the re-arm semantics of the real timer.
+func (t *fakeTicker) Reset(time.Duration) {
+	t.resets.Add(1)
+
+	for {
+		select {
+		case <-t.c:
+
+		default:
+			return
+		}
+	}
+}
+
+// resetCount reports how often the watcher re-armed the timer.
+func (t *fakeTicker) resetCount() int {
+	return int(t.resets.Load())
 }
 
 func (t *fakeTicker) Stop() {
@@ -131,7 +153,7 @@ func (t *fakeTicker) Stop() {
 }
 
 // tick delivers a single tick. Ticks that nobody consumed yet are buffered,
-// so driving a ticker never depends on worker scheduling.
+// so driving a timer never depends on worker scheduling.
 func (t *fakeTicker) tick() {
 	select {
 	case t.c <- time.Now():
@@ -139,9 +161,9 @@ func (t *fakeTicker) tick() {
 	}
 }
 
-// tickerFactory creates manually driven tickers and indexes them by the
+// tickerFactory creates manually driven timers and indexes them by the
 // interval they were created for. Tests give every target a distinct interval
-// so that each fake ticker belongs to exactly one target.
+// so that each fake timer belongs to exactly one target.
 type tickerFactory struct {
 	mu      sync.Mutex
 	tickers map[time.Duration]*fakeTicker
@@ -161,7 +183,7 @@ func (f *tickerFactory) create(d time.Duration) ticker {
 	return created
 }
 
-// at returns the fake ticker that was created for d.
+// at returns the fake timer that was created for d.
 func (f *tickerFactory) at(d time.Duration) *fakeTicker {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -170,7 +192,7 @@ func (f *tickerFactory) at(d time.Duration) *fakeTicker {
 }
 
 // newTestWatcher creates a watcher whose targets are scheduled by manually
-// driven fake tickers.
+// driven fake timers.
 func newTestWatcher(t *testing.T, checker *updates.Checker, opts Options) (*Watcher, *tickerFactory) {
 	t.Helper()
 

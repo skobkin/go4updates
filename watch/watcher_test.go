@@ -170,6 +170,37 @@ func TestWatcherWaitsIntervalAfterSlowAttempt(t *testing.T) {
 	stopWatcher(t, ctx, cancel, done)
 }
 
+func TestWatcherRearmsSchedulerAfterEveryAttempt(t *testing.T) {
+	// A purely periodic schedule keeps its phase from watcher start, so an
+	// attempt finishing shortly before the next scheduled tick would be
+	// followed by a nearly immediate re-check. The scheduler is therefore
+	// re-armed once per completed attempt instead of ticking periodically.
+	source := &stubSource{feed: testFeed("v1.1.0")}
+
+	w, factory := newTestWatcher(t, nil, Options{})
+
+	if err := w.Add("application", updates.Target{CurrentVersion: "1.0.0", Source: source}, WithInterval(time.Hour)); err != nil {
+		t.Fatalf("Add returned error: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := startWatcher(t, w, ctx)
+
+	// The immediate check re-arms the scheduler when it completes, before
+	// any interval has elapsed.
+	waitFor(t, 2*time.Second, func() bool { return source.callsSoFar() == 1 })
+	waitFor(t, 2*time.Second, func() bool { return factory.at(time.Hour).resetCount() >= 1 })
+
+	scheduler := factory.at(time.Hour)
+
+	// The next check happens only after the re-armed interval.
+	scheduler.tick()
+	waitFor(t, 2*time.Second, func() bool { return source.callsSoFar() == 2 })
+	waitFor(t, 2*time.Second, func() bool { return scheduler.resetCount() >= 2 })
+
+	stopWatcher(t, ctx, cancel, done)
+}
+
 func TestFailedAttemptPreservesPreviousResult(t *testing.T) {
 	source := &stubSource{feed: testFeed("v1.1.0")}
 
