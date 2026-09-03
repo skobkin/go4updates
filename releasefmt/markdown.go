@@ -528,10 +528,12 @@ func backtickRun(line string, i int) int {
 //
 // Autolinks ("<https://example.com>") and raw HTML tags
 // ("<span data-rev=\"...\">") are protected through their closing bracket,
-// attributes included, so transforms never rewrite content inside them. A tag
+// attributes included, so transforms never rewrite content inside them. A
+// greater-than sign inside a quoted attribute value does not close the tag,
+// so a title such as title="a > b" never ends the protection early. A tag
 // name must follow the opening bracket directly, so plain text such as
-// "a < b and c > d" stays transformable, and a second '<' before the closing
-// bracket leaves the span unprotected.
+// "a < b and c > d" stays transformable, and a second '<' outside an
+// attribute value before the closing bracket leaves the span unprotected.
 func angleSpanEnd(line string, i int) int {
 	j := i + 1
 
@@ -543,12 +545,22 @@ func angleSpanEnd(line string, i int) int {
 		return i
 	}
 
+	quote := byte(0)
+
 	for ; j < len(line); j++ {
-		switch line[j] {
-		case '>':
+		switch {
+		case quote != 0:
+			if line[j] == quote {
+				quote = 0
+			}
+
+		case line[j] == '"' || line[j] == '\'':
+			quote = line[j]
+
+		case line[j] == '>':
 			return j + 1
 
-		case '<':
+		case line[j] == '<':
 			return i
 		}
 	}

@@ -798,6 +798,21 @@ func TestMarkdownBodyHTMLTags(t *testing.T) {
 			body: "<span data-rev=\"" + testSHA,
 			want: "<span data-rev=\"" + shortLink,
 		},
+		{
+			name: "greater-than inside a quoted attribute is untouched",
+			body: "<span title=\"a > b\" data-rev=\"" + testSHA + "\">v1.0.0</span> by @alice",
+			want: "<span title=\"a > b\" data-rev=\"" + testSHA + "\">v1.0.0</span> by " + testMentionLink("alice"),
+		},
+		{
+			name: "greater-than inside a single-quoted attribute is untouched",
+			body: "<span title='fixed > earlier' data-rev='" + testSHA + "'>v1.0.0</span>",
+			want: "<span title='fixed > earlier' data-rev='" + testSHA + "'>v1.0.0</span>",
+		},
+		{
+			name: "unclosed quoted attribute does not protect the rest of the line",
+			body: "<span title=\"a > b, commit " + testSHA,
+			want: "<span title=\"a > b, commit " + shortLink,
+		},
 	}
 
 	for _, tt := range tests {
