@@ -1,0 +1,4 @@
+# Internal working documents and agent instructions.
+# These files may be present in local working copies or bootstrap archives,
+# but must never be committed.
+wip/
