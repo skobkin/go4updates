@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -89,6 +90,42 @@ func TestDoJSONNon2xxReturnsStatusError(t *testing.T) {
 
 	if !strings.Contains(statusErr.Error(), srv.URL) {
 		t.Errorf("error message %q does not mention the request URL", statusErr.Error())
+	}
+}
+
+func TestDoJSONRedactsURLCredentials(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	target, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parsing server URL: %v", err)
+	}
+
+	target.User = url.UserPassword("deploy", "hunter2")
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, target.String(), nil)
+	if err != nil {
+		t.Fatalf("building request: %v", err)
+	}
+
+	var dst []int
+
+	err = DoJSON(context.Background(), srv.Client(), req, &dst)
+
+	statusErr, ok := err.(*StatusError)
+	if !ok {
+		t.Fatalf("error = %v, want *StatusError", err)
+	}
+
+	if !strings.Contains(statusErr.URL, "xxxxx") {
+		t.Errorf("StatusError.URL = %q, want the redacted password placeholder", statusErr.URL)
+	}
+
+	if strings.Contains(statusErr.URL, "hunter2") || strings.Contains(statusErr.Error(), "hunter2") {
+		t.Errorf("error %q leaks the URL password", statusErr.Error())
 	}
 }
 

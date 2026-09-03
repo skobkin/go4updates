@@ -31,7 +31,8 @@ var ErrResponseTooLarge = errors.New("go4updates: response body exceeds size lim
 
 // StatusError describes a non-2xx HTTP response from a provider.
 type StatusError struct {
-	// URL is the request URL that produced the response.
+	// URL is the request URL that produced the response, with any password
+	// it carried redacted.
 	URL string
 
 	// StatusCode is the HTTP status code.
@@ -79,7 +80,10 @@ func DoJSON(ctx context.Context, client *http.Client, req *http.Request, dst any
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return newStatusError(req.URL.String(), resp)
+		// Errors carry a redacted URL: callers may point an adapter at a
+		// server URL with basic-auth userinfo, and the error surfaces in
+		// logs, so the password must never appear in it.
+		return newStatusError(req.URL.Redacted(), resp)
 	}
 
 	data, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBytes+1))
@@ -88,7 +92,7 @@ func DoJSON(ctx context.Context, client *http.Client, req *http.Request, dst any
 	}
 
 	if int64(len(data)) > MaxResponseBytes {
-		return fmt.Errorf("go4updates: %w: response for %s exceeds %d bytes", ErrResponseTooLarge, req.URL, MaxResponseBytes)
+		return fmt.Errorf("go4updates: %w: response for %s exceeds %d bytes", ErrResponseTooLarge, req.URL.Redacted(), MaxResponseBytes)
 	}
 
 	if err := json.Unmarshal(data, dst); err != nil {
