@@ -528,20 +528,41 @@ func backtickRun(line string, i int) int {
 //
 // Autolinks ("<https://example.com>") and raw HTML tags
 // ("<span data-rev=\"...\">") are protected through their closing bracket,
-// attributes included, so transforms never rewrite content inside them. A
-// greater-than sign inside a quoted attribute value does not close the tag,
-// so a title such as title="a > b" never ends the protection early. A tag
-// name must follow the opening bracket directly, so plain text such as
+// attributes included, so transforms never rewrite content inside them. Quote
+// characters are ordinary parts of a URI, so an autolink is told apart from
+// a tag by its leading scheme and always ends at its first closing bracket;
+// for a tag, a greater-than sign inside a quoted attribute value does not
+// close it, so a title such as title="a > b" never ends the protection early.
+// A tag name must follow the opening bracket directly, so plain text such as
 // "a < b and c > d" stays transformable, and a second '<' outside an
 // attribute value before the closing bracket leaves the span unprotected.
 func angleSpanEnd(line string, i int) int {
 	j := i + 1
 
+	closing := false
+
 	if j < len(line) && line[j] == '/' {
+		closing = true
 		j++
 	}
 
 	if j >= len(line) || !isASCIILetter(line[j]) {
+		return i
+	}
+
+	if !closing && isURIAutolink(line, i) {
+		// A URI may hold quote characters without them delimiting
+		// anything, so the autolink ends at its first closing bracket.
+		for ; j < len(line); j++ {
+			switch line[j] {
+			case '>':
+				return j + 1
+
+			case '<':
+				return i
+			}
+		}
+
 		return i
 	}
 
@@ -566,6 +587,31 @@ func angleSpanEnd(line string, i int) int {
 	}
 
 	return i
+}
+
+// isURIAutolink reports whether the angle bracket construct starting at i
+// opens with a URI scheme, as in "<https://example.com>".
+//
+// A scheme is at least two characters of the scheme alphabet followed by a
+// colon with nothing in between, so quoted attributes ("<span title=...>")
+// and one-letter namespaced tag names ("<o:EndDate>") stay on the HTML tag
+// path, where quote tracking applies.
+func isURIAutolink(line string, i int) bool {
+	j := i + 1
+
+	start := j
+
+	for j < len(line) && isSchemeChar(line[j]) {
+		j++
+	}
+
+	return j-start >= 2 && j < len(line) && line[j] == ':'
+}
+
+// isSchemeChar reports whether b may appear in a URI scheme after its first
+// letter.
+func isSchemeChar(b byte) bool {
+	return isASCIILetter(b) || (b >= '0' && b <= '9') || b == '+' || b == '-' || b == '.'
 }
 
 // isASCIILetter reports whether b is an ASCII letter.

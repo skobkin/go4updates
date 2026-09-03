@@ -813,6 +813,21 @@ func TestMarkdownBodyHTMLTags(t *testing.T) {
 			body: "<span title=\"a > b, commit " + testSHA,
 			want: "<span title=\"a > b, commit " + shortLink,
 		},
+		{
+			name: "apostrophe inside an autolink is untouched",
+			body: "<https://example.test/O'Reilly/" + testSHA + ">",
+			want: "<https://example.test/O'Reilly/" + testSHA + ">",
+		},
+		{
+			name: "quote inside an autolink is untouched",
+			body: "<https://example.test/\"release\"/" + testSHA + ">",
+			want: "<https://example.test/\"release\"/" + testSHA + ">",
+		},
+		{
+			name: "greater-than inside an attribute of a namespaced tag is untouched",
+			body: "<o:EndDate title=\"a > b\" data-rev=\"" + testSHA + "\">v1.0.0</o:EndDate>",
+			want: "<o:EndDate title=\"a > b\" data-rev=\"" + testSHA + "\">v1.0.0</o:EndDate>",
+		},
 	}
 
 	for _, tt := range tests {
