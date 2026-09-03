@@ -2,8 +2,10 @@ package markdown
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"image"
 	"math"
 	"net/http"
@@ -267,6 +269,86 @@ func TestLoadReportsImagesPastTheLimit(t *testing.T) {
 	if !errors.Is(err, errImageTooLarge) {
 		t.Fatalf("expected errImageTooLarge, got %v", err)
 	}
+}
+
+func TestLoadRejectsOversizedDeclaredDimensions(t *testing.T) {
+	// A small compressed file can declare enormous dimensions; decoding it
+	// would allocate far beyond the byte limit, so the declared size must
+	// be rejected before the image is decoded.
+	server := newImageServer(t, pngWithDimensions(t, 30000, 30000))
+
+	loader := newImageLoader(Options{RemoteImages: true}.withDefaults())
+	source := testURI(t, server.URL+"/logo.png")
+
+	_, err := loader.load(context.Background(), source)
+	if err == nil {
+		t.Fatal("expected an error for oversized declared image dimensions")
+	}
+
+	if !strings.Contains(err.Error(), "exceed") {
+		t.Fatalf("error %v does not mention the dimension limit", err)
+	}
+}
+
+func TestCheckDimensions(t *testing.T) {
+	tests := map[string]struct {
+		width   int
+		height  int
+		wantErr bool
+	}{
+		"small image passes":           {100, 100, false},
+		"pixel budget boundary passes": {4096, 4096, false},
+		"pixel budget exceeded":        {5000, 5000, true},
+		"side limit exceeded":          {40000, 10, true},
+		"zero width":                   {0, 100, true},
+		"negative height":              {100, -1, true},
+	}
+
+	for name, testCase := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := checkDimensions(image.Config{Width: testCase.width, Height: testCase.height})
+
+			if (err != nil) != testCase.wantErr {
+				t.Fatalf("checkDimensions(%dx%d) error = %v, wantErr = %v", testCase.width, testCase.height, err, testCase.wantErr)
+			}
+		})
+	}
+}
+
+// pngWithDimensions returns the bytes of a minimal PNG whose header declares
+// the given dimensions. Only the header is present: DecodeConfig reads the
+// declared size from it, and the dimension check must refuse the image before
+// any decoder looks for pixel data.
+func pngWithDimensions(t *testing.T, width, height uint32) []byte {
+	t.Helper()
+
+	png := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}
+
+	ihdr := []byte("IHDR")
+	ihdr = binary.BigEndian.AppendUint32(ihdr, width)
+	ihdr = binary.BigEndian.AppendUint32(ihdr, height)
+	ihdr = append(ihdr,
+		8, // bit depth
+		2, // color type: truecolor
+		0, // compression
+		0, // filter
+		0, // interlace
+	)
+
+	png = binary.BigEndian.AppendUint32(png, 13)
+	png = append(png, ihdr...)
+	png = binary.BigEndian.AppendUint32(png, crc32.ChecksumIEEE(ihdr))
+
+	// An empty IDAT tells DecodeConfig the header is complete.
+	png = binary.BigEndian.AppendUint32(png, 0)
+	png = append(png, "IDAT"...)
+	png = binary.BigEndian.AppendUint32(png, crc32.ChecksumIEEE([]byte("IDAT")))
+
+	png = binary.BigEndian.AppendUint32(png, 0)
+	png = append(png, "IEND"...)
+	png = binary.BigEndian.AppendUint32(png, crc32.ChecksumIEEE([]byte("IEND")))
+
+	return png
 }
 
 func TestDisplaySizeFitsTheConfiguredLimits(t *testing.T) {

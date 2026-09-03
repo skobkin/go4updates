@@ -20,6 +20,21 @@ import (
 // limit, whether the size was known up front or discovered while reading.
 var errImageTooLarge = errors.New("image exceeds the configured size limit")
 
+const (
+	// maxDecodedImageSide bounds one side of a declared image size before
+	// the pixel count is compared, so that comparison cannot overflow.
+	maxDecodedImageSide = 1<<15 - 1
+
+	// maxDecodedImagePixels bounds the number of pixels a remote image may
+	// decode to. The byte limit on the download does not bound the decoded
+	// size: a highly compressed file can declare enormous dimensions, and
+	// decoding it would allocate far beyond the limit. The bound is
+	// independent of MaxImageWidth and MaxImageHeight, which only scale the
+	// rendered result, and leaves room for any realistically sized
+	// screenshot.
+	maxDecodedImagePixels = 1 << 24 // 16.7 Mpx, about 64 MiB of RGBA pixels
+)
+
 // imageLoader carries the image loading policy of a single [NewRichText]
 // call. It is not shared between calls and never stored globally.
 type imageLoader struct {
@@ -140,11 +155,17 @@ func displaySize(config image.Config, maxWidth, maxHeight float32) fyne.Size {
 
 // decodeImage decodes an image body twice on purpose: the metadata pass
 // consumes its reader, so sizing and rendering each get their own reader over
-// the same bytes.
+// the same bytes. The declared size is validated before decoding, so an image
+// cannot grow past the download limit by decompressing into a huge pixel
+// buffer.
 func decodeImage(data []byte, maxWidth, maxHeight float32) (*loadedImage, error) {
 	config, _, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("reading image size: %w", err)
+	}
+
+	if err := checkDimensions(config); err != nil {
+		return nil, err
 	}
 
 	picture, _, err := image.Decode(bytes.NewReader(data))
@@ -153,6 +174,24 @@ func decodeImage(data []byte, maxWidth, maxHeight float32) (*loadedImage, error)
 	}
 
 	return &loadedImage{picture: picture, size: displaySize(config, maxWidth, maxHeight)}, nil
+}
+
+// checkDimensions reports whether the declared size of an image is plausible
+// and small enough to decode safely.
+func checkDimensions(config image.Config) error {
+	if config.Width < 1 || config.Height < 1 {
+		return fmt.Errorf("image declares invalid dimensions %dx%d", config.Width, config.Height)
+	}
+
+	if config.Width > maxDecodedImageSide || config.Height > maxDecodedImageSide {
+		return fmt.Errorf("image dimensions %dx%d exceed the limit of %d pixels per side", config.Width, config.Height, maxDecodedImageSide)
+	}
+
+	if config.Width*config.Height > maxDecodedImagePixels {
+		return fmt.Errorf("image dimensions %dx%d exceed the limit of %d pixels", config.Width, config.Height, maxDecodedImagePixels)
+	}
+
+	return nil
 }
 
 // uriSchemeAllowed reports whether the scheme of source is an image scheme.
