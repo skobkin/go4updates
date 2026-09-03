@@ -43,14 +43,24 @@ func MarkdownBody(body string, opts Options) string {
 
 	fenced := false
 
+	// open holds the state of the fenced code block the document currently
+	// carries, so only the marker that opened the block can close it.
+	var open fence
+
 	for i, line := range lines {
-		if isFenceLine(line) {
-			fenced = !fenced
+		if fenced {
+			if closesFence(line, open) {
+				fenced = false
+				open = fence{}
+			}
 
 			continue
 		}
 
-		if fenced {
+		if opened, ok := openFence(line); ok {
+			fenced = true
+			open = opened
+
 			continue
 		}
 
@@ -58,6 +68,79 @@ func MarkdownBody(body string, opts Options) string {
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+// fence is the state of the fenced code block a document currently holds.
+type fence struct {
+	// marker is the character the block was opened with.
+	marker byte
+
+	// length is the number of marker characters the opening fence used.
+	length int
+}
+
+// openFence reports that line opens a fenced code block, returning the state
+// of the opened block.
+//
+// A fence is an up to three space indented run of at least three backticks or
+// tildes, optionally followed by an info string. An info string of a backtick
+// fence may not contain backticks; such a line is content, not a fence.
+func openFence(line string) (fence, bool) {
+	marker, length, rest, ok := fenceRun(line)
+	if !ok {
+		return fence{}, false
+	}
+
+	if marker == '`' && strings.IndexByte(rest, '`') >= 0 {
+		return fence{}, false
+	}
+
+	return fence{marker: marker, length: length}, true
+}
+
+// closesFence reports whether line closes the fenced code block open holds.
+//
+// A closing fence uses the same marker character as the opening one, uses at
+// least as many of them, and carries nothing but whitespace after the run.
+func closesFence(line string, open fence) bool {
+	marker, length, rest, ok := fenceRun(line)
+	if !ok {
+		return false
+	}
+
+	return marker == open.marker && length >= open.length && strings.TrimLeft(rest, " \t") == ""
+}
+
+// fenceRun returns the marker character, the marker run length, and the rest
+// of the line for a fence candidate. The boolean result reports that line
+// starts with a run of at least three backticks or tildes.
+func fenceRun(line string) (byte, int, string, bool) {
+	i := 0
+
+	for i < len(line) && i < 3 && (line[i] == ' ' || line[i] == '\t') {
+		i++
+	}
+
+	if i >= len(line) {
+		return 0, 0, "", false
+	}
+
+	marker := line[i]
+	if marker != '`' && marker != '~' {
+		return 0, 0, "", false
+	}
+
+	n := 0
+
+	for i+n < len(line) && line[i+n] == marker {
+		n++
+	}
+
+	if n < 3 {
+		return 0, 0, "", false
+	}
+
+	return marker, n, line[i+n:], true
 }
 
 // transformLine rewrites the transformable parts of a single Markdown line.
@@ -469,32 +552,6 @@ func isLinkRefDef(line string) bool {
 	}
 
 	return strings.TrimLeft(rest, " \t") != ""
-}
-
-// isFenceLine reports whether line opens or closes a fenced code block.
-func isFenceLine(line string) bool {
-	i := 0
-
-	for i < len(line) && i < 3 && (line[i] == ' ' || line[i] == '\t') {
-		i++
-	}
-
-	if i >= len(line) {
-		return false
-	}
-
-	marker := line[i]
-	if marker != '`' && marker != '~' {
-		return false
-	}
-
-	n := 0
-
-	for i+n < len(line) && line[i+n] == marker {
-		n++
-	}
-
-	return n >= 3
 }
 
 // isDigit reports whether b is an ASCII decimal digit.

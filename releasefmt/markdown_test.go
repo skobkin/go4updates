@@ -241,6 +241,68 @@ func TestMarkdownBodyCommitHashes(t *testing.T) {
 	}
 }
 
+func TestMarkdownBodyFenceMarkers(t *testing.T) {
+	opts := Options{Linker: testGitHubLinker(), ShortCommitSHA: true}
+
+	shortLink := "[" + testShortSHA + "](" + testCommitURL + ")"
+
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "tilde line inside a backtick fence is content",
+			body: "```\nsetup\n~~~\ncommit " + testSHA + "\n```\ncommit " + testSHA,
+			want: "```\nsetup\n~~~\ncommit " + testSHA + "\n```\ncommit " + shortLink,
+		},
+		{
+			name: "backtick line inside a tilde fence is content",
+			body: "~~~\ncommit " + testSHA + "\n```\ncommit " + testSHA + "\n~~~\ncommit " + testSHA,
+			want: "~~~\ncommit " + testSHA + "\n```\ncommit " + testSHA + "\n~~~\ncommit " + shortLink,
+		},
+		{
+			name: "shorter run of the other marker does not close",
+			body: "~~~~\ncommit " + testSHA + "\n~~~\ncommit " + testSHA + "\n~~~~\ncommit " + testSHA,
+			want: "~~~~\ncommit " + testSHA + "\n~~~\ncommit " + testSHA + "\n~~~~\ncommit " + shortLink,
+		},
+		{
+			name: "longer run of the same marker closes",
+			body: "```\ncommit " + testSHA + "\n`````\ncommit " + testSHA,
+			want: "```\ncommit " + testSHA + "\n`````\ncommit " + shortLink,
+		},
+		{
+			name: "closing run with trailing text is content",
+			body: "```\ncommit " + testSHA + "\n``` not a close\ncommit " + testSHA + "\n```\ncommit " + testSHA,
+			want: "```\ncommit " + testSHA + "\n``` not a close\ncommit " + testSHA + "\n```\ncommit " + shortLink,
+		},
+		{
+			name: "indented fence opens and closes",
+			body: "  ```\ncommit " + testSHA + "\n  ```\ncommit " + testSHA,
+			want: "  ```\ncommit " + testSHA + "\n  ```\ncommit " + shortLink,
+		},
+		{
+			name: "backtick info string is not a fence",
+			body: "```go `x`\ncommit " + testSHA + "\n```\ncommit " + testSHA,
+			want: "```go `x`\ncommit " + shortLink + "\n```\ncommit " + testSHA,
+		},
+		{
+			name: "tilde info string may contain anything",
+			body: "~~~go title=`x`\ncommit " + testSHA + "\n~~~\ncommit " + testSHA,
+			want: "~~~go title=`x`\ncommit " + testSHA + "\n~~~\ncommit " + shortLink,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := MarkdownBody(tt.body, opts)
+			if got != tt.want {
+				t.Errorf("MarkdownBody() =\n%q\nwant\n%q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestMarkdownBodyIssueReferences(t *testing.T) {
 	linked := Options{Linker: testGitHubLinker()}
 	short := Options{Linker: testGitHubLinker(), ShortCommitSHA: true}
