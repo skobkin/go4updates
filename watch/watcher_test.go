@@ -129,6 +129,47 @@ func TestPerTargetIntervalsAreIndependent(t *testing.T) {
 	stopWatcher(t, ctx, cancel, done)
 }
 
+func TestWatcherWaitsIntervalAfterSlowAttempt(t *testing.T) {
+	// An attempt that outlasts its interval must not turn into an immediate
+	// re-check: the tick that fired while it was running is dropped and the
+	// source is approached again only one full interval later.
+	source := newGatedSource(testFeed("v1.1.0"))
+
+	w, factory := newTestWatcher(t, nil, Options{})
+
+	if err := w.Add("application", updates.Target{CurrentVersion: "1.0.0", Source: source}, WithInterval(2*time.Hour)); err != nil {
+		t.Fatalf("Add returned error: %v", err)
+	}
+
+	events, unsubscribe := w.Subscribe()
+	defer unsubscribe()
+
+	collector := collectEvents(t, events)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := startWatcher(t, w, ctx)
+
+	// The immediate check blocks in the source.
+	waitFor(t, 2*time.Second, func() bool { return source.callsSoFar() == 1 })
+
+	// The interval elapses while the attempt is still running.
+	factory.at(2 * time.Hour).tick()
+
+	source.release()
+
+	waitFor(t, 2*time.Second, func() bool { return collector.count() >= 1 })
+
+	if calls := source.callsSoFar(); calls != 1 {
+		t.Fatalf("slow source was approached %d times right after its attempt, want 1", calls)
+	}
+
+	// The next check waits for the next interval.
+	factory.at(2 * time.Hour).tick()
+	waitFor(t, 2*time.Second, func() bool { return source.callsSoFar() == 2 })
+
+	stopWatcher(t, ctx, cancel, done)
+}
+
 func TestFailedAttemptPreservesPreviousResult(t *testing.T) {
 	source := &stubSource{feed: testFeed("v1.1.0")}
 

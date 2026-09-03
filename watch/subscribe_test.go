@@ -64,12 +64,17 @@ func TestCoalescingKeepsPendingEventsOfOtherTargets(t *testing.T) {
 	})
 
 	// Four more attempts of the busy target must collapse into its single
-	// pending event and must not touch the pending event of other.
+	// pending event and must not touch the pending event of other. The
+	// attempts are driven one interval at a time: a target waits its
+	// interval after a completed attempt instead of consuming queued ticks
+	// back to back.
+	seq := uint64(2)
 	for range 4 {
 		factory.at(10 * time.Millisecond).tick()
-	}
+		seq++
 
-	waitFor(t, 2*time.Second, func() bool { return pendingSeq(sub, "busy") == 6 })
+		waitFor(t, 2*time.Second, func() bool { return pendingSeq(sub, "busy") == seq })
+	}
 
 	if got := pendingSeq(sub, "other"); got != 1 {
 		t.Errorf("other pending sequence = %d, want 1: the busy target must not evict it", got)

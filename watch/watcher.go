@@ -28,7 +28,9 @@
 //	}
 //
 // Every target is checked once immediately when the watcher starts and then
-// once per interval. Each attempt is bounded by the configured timeout. The
+// again one interval after each completed attempt, so a check that outlasts
+// its interval is never followed by an immediate re-check. Each attempt is
+// bounded by the configured timeout. The
 // state of a target survives failed attempts: a failed check keeps the last
 // successful updates.Result and refreshes only the attempt timestamp and the
 // error.
@@ -69,8 +71,9 @@ const (
 // Values are resolved when they are used, not when the watcher is created, so
 // the zero value selects the package defaults.
 type Options struct {
-	// Interval is how often every target is checked after its immediate
-	// first check. A non-positive value selects a 12 hour interval.
+	// Interval is the time a target waits after a completed check before it
+	// is checked again, starting with the immediate first check. A
+	// non-positive value selects a 12 hour interval.
 	Interval time.Duration
 
 	// Timeout bounds a single check attempt of one target. A non-positive
@@ -224,10 +227,10 @@ func (w *Watcher) Add(id string, target updates.Target, opts ...AddOption) error
 // Run starts the watcher and blocks until ctx is done.
 //
 // Every target performs an immediate check when Run starts and is checked
-// again once per interval afterwards. Each attempt runs under a timeout
-// derived from Options.Timeout and from ctx. Run returns nil when ctx ends,
-// whether through cancellation or through a deadline: the context ending is
-// the normal way for a watcher to stop, not a failure.
+// again one interval after each completed attempt. Each attempt runs under a
+// timeout derived from Options.Timeout and from ctx. Run returns nil when ctx
+// ends, whether through cancellation or through a deadline: the context ending
+// is the normal way for a watcher to stop, not a failure.
 //
 // Run is single use. A second call returns ErrWatcherStarted, as does Add
 // after Run. The lifecycle of a watcher is configured -> running -> finished.
@@ -274,8 +277,8 @@ func (w *Watcher) Run(ctx context.Context) error {
 	return nil
 }
 
-// watchTarget checks a single target immediately and then once per interval
-// until ctx is done.
+// watchTarget checks a single target immediately and then again one interval
+// after each completed attempt until ctx is done.
 func (w *Watcher) watchTarget(ctx context.Context, target watchedTarget) {
 	scheduler := w.newTicker(w.intervalFor(target))
 	defer scheduler.Stop()
@@ -285,12 +288,34 @@ func (w *Watcher) watchTarget(ctx context.Context, target watchedTarget) {
 	}
 
 	for {
+		// Ticks that fired while the previous attempt was running are
+		// dropped: the next wait is a full interval measured after the
+		// attempt, so a check that outlasts its interval is never followed
+		// by an immediate re-check of a slow source.
+		drainTicker(scheduler)
+
 		select {
 		case <-ctx.Done():
 			return
 
 		case <-scheduler.C():
 			w.attempt(ctx, target)
+		}
+	}
+}
+
+// drainTicker discards the ticks a ticker delivered while the last attempt was
+// running.
+func drainTicker(t ticker) {
+	for {
+		select {
+		case _, ok := <-t.C():
+			if !ok {
+				return
+			}
+
+		default:
+			return
 		}
 	}
 }

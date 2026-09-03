@@ -77,6 +77,11 @@ func (s *gatedSource) release() {
 	s.once.Do(func() { close(s.gate) })
 }
 
+// callsSoFar reports the number of Fetch calls so far.
+func (s *gatedSource) callsSoFar() int {
+	return int(s.calls.Load())
+}
+
 // publishedEvents reports how many events the watcher has published so far.
 func publishedEvents(w *Watcher) uint64 {
 	w.mu.RLock()
