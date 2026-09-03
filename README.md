@@ -1,4 +1,4 @@
-# go4updates
+# go4updates [![CI](https://ci.skobk.in/api/badges/24/status.svg)](https://ci.skobk.in/repos/24)
 
 `go4updates` is a small, composable Go library for checking software releases.
 
