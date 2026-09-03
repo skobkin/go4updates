@@ -673,6 +673,81 @@ func TestMarkdownBodyScannerEdges(t *testing.T) {
 	}
 }
 
+func TestMarkdownBodyReferenceLinks(t *testing.T) {
+	opts := Options{Linker: testGitHubLinker(), ShortCommitSHA: true}
+
+	shortLink := "[" + testShortSHA + "](" + testCommitURL + ")"
+
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "full reference link is untouched",
+			body: "[see " + testSHA + " for details][notes]",
+			want: "[see " + testSHA + " for details][notes]",
+		},
+		{
+			name: "full reference image is untouched",
+			body: "![build " + testSHA + "][badge]",
+			want: "![build " + testSHA + "][badge]",
+		},
+		{
+			name: "collapsed reference is untouched",
+			body: "[release " + testSHA + "][]",
+			want: "[release " + testSHA + "][]",
+		},
+		{
+			name: "shortcut reference with a defined label is untouched",
+			body: "[1]: https://example.com/releases/1\nGrab build [1] from " + testSHA,
+			want: "[1]: https://example.com/releases/1\nGrab build [1] from " + shortLink,
+		},
+		{
+			name: "shortcut reference labels match case-insensitively",
+			body: "[Release Notes]: https://example.com\nSee [release notes] about " + testSHA,
+			want: "[Release Notes]: https://example.com\nSee [release notes] about " + shortLink,
+		},
+		{
+			name: "shortcut reference labels ignore whitespace runs",
+			body: "[long  label]: https://example.com\nSee [long\tlabel] about " + testSHA,
+			want: "[long  label]: https://example.com\nSee [long\tlabel] about " + shortLink,
+		},
+		{
+			name: "undefined bracket text is not a link and stays transformable",
+			body: "notes [" + testSHA + " somewhere]",
+			want: "notes [" + shortLink + " somewhere]",
+		},
+		{
+			name: "unclosed reference label does not protect",
+			body: "[see " + testSHA + "][notes",
+			want: "[see " + shortLink + "][notes",
+		},
+		{
+			name: "references and inline links coexist on one line",
+			body: "[compare " + testSHA + "][diff] and [inline " + testSHA + "](https://example.com)",
+			want: "[compare " + testSHA + "][diff] and [inline " + testSHA + "](https://example.com)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := MarkdownBody(tt.body, opts)
+			if got != tt.want {
+				t.Errorf("MarkdownBody() =\n%q\nwant\n%q", got, tt.want)
+			}
+		})
+	}
+
+	body := "[notes]: https://example.com\nRelease [notes] mentions " + testSHA + " (#12)"
+	once := MarkdownBody(body, opts)
+	twice := MarkdownBody(once, opts)
+
+	if once != twice {
+		t.Errorf("MarkdownBody is not idempotent:\nfirst:\n%s\nsecond:\n%s", once, twice)
+	}
+}
+
 func TestMarkdownBodyMixedDocument(t *testing.T) {
 	linker := testGitHubLinker()
 

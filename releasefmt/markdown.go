@@ -31,7 +31,10 @@ type Options struct {
 // ten characters when opts.ShortCommitSHA is set, with or without a Linker.
 // Everything else is left as it is: fenced code blocks, inline code spans,
 // links, images, autolinks, and link reference definitions are never
-// modified, so the raw document structure survives.
+// modified, so the raw document structure survives. Links and images include
+// the inline "[text](destination)" form as well as the reference forms
+// "[text][label]", "[label][]", and "[label]" for labels the document
+// defines.
 //
 // Applying MarkdownBody to its own output changes nothing.
 func MarkdownBody(body string, opts Options) string {
@@ -40,6 +43,8 @@ func MarkdownBody(body string, opts Options) string {
 	}
 
 	lines := strings.Split(body, "\n")
+
+	labels := definedLinkLabels(lines)
 
 	fenced := false
 
@@ -64,7 +69,7 @@ func MarkdownBody(body string, opts Options) string {
 			continue
 		}
 
-		lines[i] = transformLine(line, opts)
+		lines[i] = transformLine(line, labels, opts)
 	}
 
 	return strings.Join(lines, "\n")
@@ -144,12 +149,14 @@ func fenceRun(line string) (byte, int, string, bool) {
 }
 
 // transformLine rewrites the transformable parts of a single Markdown line.
-func transformLine(line string, opts Options) string {
+// labels holds the normalized labels of the document's link reference
+// definitions, so shortcut references can be recognized as links.
+func transformLine(line string, labels map[string]struct{}, opts Options) string {
 	if isLinkRefDef(line) {
 		return line
 	}
 
-	spans := protectedSpans(line)
+	spans := protectedSpans(line, labels)
 	if len(spans) == 0 {
 		return transformSegment(line, opts)
 	}
@@ -371,14 +378,15 @@ type span struct {
 }
 
 // protectedSpans returns the ranges of line that hold existing Markdown
-// constructs, in order.
-func protectedSpans(line string) []span {
+// constructs, in order. labels holds the normalized labels of the document's
+// link reference definitions.
+func protectedSpans(line string, labels map[string]struct{}) []span {
 	var spans []span
 
 	i := 0
 
 	for i < len(line) {
-		next, found := protectedSpanAt(line, i)
+		next, found := protectedSpanAt(line, i, labels)
 		if !found {
 			i++
 
@@ -394,7 +402,7 @@ func protectedSpans(line string) []span {
 }
 
 // protectedSpanAt returns the protected construct starting at i, if any.
-func protectedSpanAt(line string, i int) (span, bool) {
+func protectedSpanAt(line string, i int, labels map[string]struct{}) (span, bool) {
 	switch line[i] {
 	case '`':
 		if end := codeSpanEnd(line, i); end > i {
@@ -407,19 +415,76 @@ func protectedSpanAt(line string, i int) (span, bool) {
 		}
 
 	case '[':
-		if end, ok := inlineLinkEnd(line, i); ok {
+		if end, ok := linkSpan(line, i, labels); ok {
 			return span{start: i, end: end}, true
 		}
 
 	case '!':
 		if i+1 < len(line) && line[i+1] == '[' {
-			if end, ok := inlineLinkEnd(line, i+1); ok {
+			if end, ok := linkSpan(line, i+1, labels); ok {
 				return span{start: i, end: end}, true
 			}
 		}
 	}
 
 	return span{}, false
+}
+
+// linkSpan returns the end of the link or image construct whose opening
+// bracket is at i, and whether the line holds one.
+//
+// Inline links "[text](destination)" and the reference forms "[text][label]"
+// and "[label][]" are protected as a whole, so a label or a reference text
+// holding references is never rewritten inside them. A shortcut reference
+// "[label]" is protected when the document defines the label; an undefined
+// one is plain text.
+func linkSpan(line string, i int, labels map[string]struct{}) (int, bool) {
+	closing, ok := bracketEnd(line, i)
+	if !ok {
+		return i, false
+	}
+
+	if closing+1 < len(line) {
+		switch line[closing+1] {
+		case '(':
+			return destinationEnd(line, closing+1)
+
+		case '[':
+			if end, ok := bracketEnd(line, closing+1); ok {
+				return end + 1, true
+			}
+
+			return i, false
+		}
+	}
+
+	if _, ok := labels[normalizeLabel(line[i+1:closing])]; ok {
+		return closing + 1, true
+	}
+
+	return i, false
+}
+
+// destinationEnd returns the end of the parenthesized destination that opens
+// at i, and whether it is closed on the same line.
+func destinationEnd(line string, i int) (int, bool) {
+	depth := 1
+
+	for j := i + 1; j < len(line); j++ {
+		switch line[j] {
+		case '(':
+			depth++
+
+		case ')':
+			depth--
+		}
+
+		if depth == 0 {
+			return j + 1, true
+		}
+	}
+
+	return i, false
 }
 
 // codeSpanEnd returns the end of the inline code span whose backtick run
@@ -475,37 +540,6 @@ func autolinkEnd(line string, i int) int {
 	return i
 }
 
-// inlineLinkEnd returns the end of the "[text](destination)" construct whose
-// opening bracket is at i, and whether one was found.
-func inlineLinkEnd(line string, i int) (int, bool) {
-	closing, ok := bracketEnd(line, i)
-	if !ok {
-		return i, false
-	}
-
-	if closing+1 >= len(line) || line[closing+1] != '(' {
-		return i, false
-	}
-
-	depth := 1
-
-	for j := closing + 2; j < len(line); j++ {
-		switch line[j] {
-		case '(':
-			depth++
-
-		case ')':
-			depth--
-		}
-
-		if depth == 0 {
-			return j + 1, true
-		}
-	}
-
-	return i, false
-}
-
 // bracketEnd returns the position of the "]" closing the bracket opened at i,
 // and whether it is present on the same line.
 func bracketEnd(line string, i int) (int, bool) {
@@ -531,6 +565,14 @@ func bracketEnd(line string, i int) (int, bool) {
 // isLinkRefDef reports whether line is a Markdown link reference definition
 // such as "[1]: https://example.com".
 func isLinkRefDef(line string) bool {
+	_, ok := linkRefDefLabel(line)
+
+	return ok
+}
+
+// linkRefDefLabel returns the label of the link reference definition line
+// holds, and whether line is one. The label is returned as written.
+func linkRefDefLabel(line string) (string, bool) {
 	i := 0
 
 	for i < len(line) && i < 3 && (line[i] == ' ' || line[i] == '\t') {
@@ -538,20 +580,44 @@ func isLinkRefDef(line string) bool {
 	}
 
 	if i >= len(line) || line[i] != '[' {
-		return false
+		return "", false
 	}
 
 	closing := strings.IndexByte(line[i:], ']')
 	if closing < 0 {
-		return false
+		return "", false
 	}
 
 	rest, found := strings.CutPrefix(line[i+closing+1:], ":")
 	if !found {
-		return false
+		return "", false
 	}
 
-	return strings.TrimLeft(rest, " \t") != ""
+	if strings.TrimLeft(rest, " \t") == "" {
+		return "", false
+	}
+
+	return line[i+1 : i+closing], true
+}
+
+// definedLinkLabels collects the labels of the link reference definitions a
+// document carries, normalized for comparison.
+func definedLinkLabels(lines []string) map[string]struct{} {
+	labels := make(map[string]struct{})
+
+	for _, line := range lines {
+		if label, ok := linkRefDefLabel(line); ok {
+			labels[normalizeLabel(label)] = struct{}{}
+		}
+	}
+
+	return labels
+}
+
+// normalizeLabel normalizes a link label for comparison the way Markdown
+// renderers compare them: case folded, with whitespace runs collapsed.
+func normalizeLabel(label string) string {
+	return strings.Join(strings.Fields(strings.ToLower(label)), " ")
 }
 
 // isDigit reports whether b is an ASCII decimal digit.
