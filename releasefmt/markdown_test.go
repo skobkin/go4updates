@@ -828,6 +828,11 @@ func TestMarkdownBodyHTMLTags(t *testing.T) {
 			body: "<o:EndDate title=\"a > b\" data-rev=\"" + testSHA + "\">v1.0.0</o:EndDate>",
 			want: "<o:EndDate title=\"a > b\" data-rev=\"" + testSHA + "\">v1.0.0</o:EndDate>",
 		},
+		{
+			name: "greater-than inside an attribute of a multi-character namespaced tag is untouched",
+			body: "<svg:path title=\"a > b\" data-rev=\"" + testSHA + "\">v1.0.0</svg:path>",
+			want: "<svg:path title=\"a > b\" data-rev=\"" + testSHA + "\">v1.0.0</svg:path>",
+		},
 	}
 
 	for _, tt := range tests {
