@@ -15,6 +15,34 @@ The root module intentionally does **not** depend on Fyne or another UI framewor
 UI integrations live in separate nested Go modules, so a headless service or TUI
 can use the core library without pulling GUI dependencies into its module graph.
 
+## Installation
+
+```sh
+go get github.com/skobkin/go4updates
+```
+
+For the Fyne update dialog and Markdown renderer:
+
+```sh
+go get github.com/skobkin/go4updates/ui/fyne
+```
+
+The nested module automatically pulls in the core library; the reverse is never
+true — depending on the core module does not add Fyne to your build.
+
+## Requirements
+
+Go 1.25 or newer. Both modules declare `go 1.25.0` and are tested in CI against
+both the minimum supported and the current Go release.
+
+## Status
+
+This is a v0.x release: until v1.0 the API may still change between minor
+versions. The core checking model (sources, checker, watcher, results) is
+considered settled; remaining evolution is expected around asset download and
+self-update, which are intentionally out of scope for v0.1 — see
+[Non-goals for v0.1](#non-goals-for-v01).
+
 ## Design
 
 The library separates responsibilities into small layers:
