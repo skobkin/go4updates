@@ -73,7 +73,8 @@ type Feed struct {
 // pre-releases are included.
 type FetchOptions struct {
 	// Limit is the maximum number of releases to return.
-	// Zero means DefaultReleaseLimit; negative values are invalid.
+	// Zero means DefaultReleaseLimit; negative values are rejected with an
+	// error by the bundled sources.
 	Limit int
 
 	// IncludePrereleases controls whether pre-releases may be returned.
@@ -97,7 +98,8 @@ const (
 	StatusUpdateAvailable
 )
 
-// String implements fmt.Stringer.
+// String implements fmt.Stringer. Values other than the two recognized
+// statuses, including the zero StatusUnknown, render as "unknown".
 func (s Status) String() string {
 	switch s {
 	case StatusUpToDate:

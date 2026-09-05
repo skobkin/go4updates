@@ -7,6 +7,13 @@ import "context"
 // Implementations must only retrieve and normalize data: they must not
 // compare versions, cache, schedule work, or rewrite release Markdown.
 // Fetch must honor context cancellation.
+//
+// The bundled GitHub, Forgejo, and GitLab adapters report retrieval failures
+// as wrapped errors: non-2xx responses, response bodies above the 4 MiB
+// fetch limit, and malformed payloads all surface as errors from Fetch, as
+// does a negative FetchOptions.Limit. v0.1 exports no sentinel errors or
+// error types for these failures, so callers should treat the errors as
+// diagnostic values rather than match against them.
 type Source interface {
 	// Fetch returns the current release feed according to opts.
 	Fetch(ctx context.Context, opts FetchOptions) (Feed, error)
