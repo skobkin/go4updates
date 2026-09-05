@@ -207,7 +207,7 @@ func isCommitSHA(s string) bool {
 		return false
 	}
 
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		if !isHexDigit(s[i]) {
 			return false
 		}
@@ -222,7 +222,7 @@ func isIssueNumber(s string) bool {
 		return false
 	}
 
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		if !isDigit(s[i]) {
 			return false
 		}
@@ -237,7 +237,7 @@ func isMentionName(s string) bool {
 		return false
 	}
 
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		if !isMentionByte(s[i]) {
 			return false
 		}
