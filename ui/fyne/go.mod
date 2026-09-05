@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	fyne.io/fyne/v2 v2.7.4
-	github.com/skobkin/go4updates v0.0.0
+	github.com/skobkin/go4updates v0.1.0
 )
 
 require (
@@ -36,7 +36,3 @@ require (
 	golang.org/x/text v0.22.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-// Temporary bootstrap replace so the nested module builds against the local
-// root module; must be removed before this module is published.
-replace github.com/skobkin/go4updates => ../..
