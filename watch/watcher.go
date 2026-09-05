@@ -123,10 +123,6 @@ type Watcher struct {
 	checker *updates.Checker
 	options Options
 
-	// newTicker creates the ticker a target worker schedules itself with.
-	// It is a seam for tests; production code always uses newRealTicker.
-	newTicker func(time.Duration) ticker
-
 	mu       sync.RWMutex
 	targets  map[string]watchedTarget
 	states   map[string]State
@@ -134,49 +130,6 @@ type Watcher struct {
 	started  bool
 	finished bool
 	seq      uint64
-}
-
-// ticker is the timer a target worker spaces its checks with. The watcher
-// re-arms it after every completed attempt, so the wait before the next check
-// is always a full interval instead of the leftover phase of a periodic
-// schedule.
-type ticker interface {
-	// C returns the stream carrying one signal per scheduled interval.
-	C() <-chan time.Time
-
-	// Reset re-arms the timer to signal once after d, dropping a signal
-	// that was pending.
-	Reset(d time.Duration)
-
-	// Stop releases the timer.
-	Stop()
-}
-
-// realTicker adapts time.Timer to the ticker interface.
-type realTicker struct {
-	timer *time.Timer
-}
-
-// newRealTicker creates a time.Timer based ticker. The duration is always
-// positive: the watcher resolves intervals at use time.
-func newRealTicker(d time.Duration) ticker {
-	return &realTicker{timer: time.NewTimer(d)}
-}
-
-// C returns the stream carrying one signal per scheduled interval.
-func (t *realTicker) C() <-chan time.Time {
-	return t.timer.C
-}
-
-// Reset re-arms the timer to signal once after d, dropping a signal that was
-// pending.
-func (t *realTicker) Reset(d time.Duration) {
-	t.timer.Reset(d)
-}
-
-// Stop releases the timer.
-func (t *realTicker) Stop() {
-	t.timer.Stop()
 }
 
 // New creates a Watcher that checks targets with checker.
@@ -190,12 +143,11 @@ func New(checker *updates.Checker, opts Options) *Watcher {
 	}
 
 	return &Watcher{
-		checker:   checker,
-		options:   opts,
-		newTicker: newRealTicker,
-		targets:   make(map[string]watchedTarget),
-		states:    make(map[string]State),
-		subs:      make(map[*subscription]struct{}),
+		checker: checker,
+		options: opts,
+		targets: make(map[string]watchedTarget),
+		states:  make(map[string]State),
+		subs:    make(map[*subscription]struct{}),
 	}
 }
 
@@ -271,13 +223,9 @@ func (w *Watcher) Run(ctx context.Context) error {
 	var wg sync.WaitGroup
 
 	for _, target := range targets {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			w.watchTarget(runCtx, target)
-		}()
+		})
 	}
 
 	<-ctx.Done()
@@ -292,8 +240,13 @@ func (w *Watcher) Run(ctx context.Context) error {
 
 // watchTarget checks a single target immediately and then again one interval
 // after each completed attempt until ctx is done.
+//
+// The timer is re-armed after every completed attempt: the wait before the
+// next check is always a full interval, never the leftover phase of a
+// periodic schedule, and a signal that fired while the attempt was running is
+// dropped.
 func (w *Watcher) watchTarget(ctx context.Context, target watchedTarget) {
-	scheduler := w.newTicker(w.intervalFor(target))
+	scheduler := time.NewTimer(w.intervalFor(target))
 	defer scheduler.Stop()
 
 	if ctx.Err() == nil {
@@ -301,17 +254,13 @@ func (w *Watcher) watchTarget(ctx context.Context, target watchedTarget) {
 	}
 
 	for {
-		// The scheduler is re-armed after every completed attempt: the wait
-		// before the next check is always a full interval, never the
-		// leftover phase of a periodic schedule, and a signal that fired
-		// while the attempt was running is dropped.
 		scheduler.Reset(w.intervalFor(target))
 
 		select {
 		case <-ctx.Done():
 			return
 
-		case <-scheduler.C():
+		case <-scheduler.C:
 			w.attempt(ctx, target)
 		}
 	}

@@ -86,14 +86,10 @@ func (c *Checker) CheckAll(ctx context.Context, targets []Target) []Outcome {
 	var wg sync.WaitGroup
 
 	for i, target := range targets {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			result, err := c.Check(ctx, target)
 			outcomes[i] = Outcome{Result: result, Err: err}
-		}()
+		})
 	}
 
 	wg.Wait()
