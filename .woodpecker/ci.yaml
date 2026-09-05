@@ -12,7 +12,7 @@ clone:
 
 steps:
   root-fmt:
-    image: golang:1.27
+    image: golang:1.25
     commands:
       - |
         fmt_out=$(gofmt -l . 2>/dev/null)
@@ -23,39 +23,39 @@ steps:
         fi
 
   root-vet:
-    image: golang:1.27
+    image: golang:1.25
     environment:
       GOCACHE: /tmp/.gocache
     commands:
       - go vet ./...
 
   root-test:
-    image: golang:1.27
+    image: golang:1.25
     environment:
       GOCACHE: /tmp/.gocache
     commands:
       - go test -race ./...
 
   root-lint:
-    image: golang:1.27
+    image: golang:1.25
     environment:
       XDG_CACHE_HOME: /tmp/.cache
       GOCACHE: /tmp/.gocache
     commands:
       # Installing on the same Go image guarantees a golangci-lint binary
       # built for the exact toolchain version the other steps use.
-      - go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
+      - go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
       - /go/bin/golangci-lint run
 
   fyne-vet:
-    image: golang:1.27
+    image: golang:1.25
     environment:
       GOCACHE: /tmp/.gocache
     commands:
       - cd ui/fyne && go vet ./...
 
   fyne-test:
-    image: golang:1.27
+    image: golang:1.25
     environment:
       GOCACHE: /tmp/.gocache
     commands:
@@ -66,10 +66,10 @@ steps:
       - cd ui/fyne && go test ./...
 
   fyne-lint:
-    image: golang:1.27
+    image: golang:1.25
     environment:
       XDG_CACHE_HOME: /tmp/.cache
       GOCACHE: /tmp/.gocache
     commands:
-      - go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
+      - go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
       - cd ui/fyne && /go/bin/golangci-lint run --config ../../golangci.yml

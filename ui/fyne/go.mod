@@ -1,6 +1,6 @@
 module github.com/skobkin/go4updates/ui/fyne
 
-go 1.27
+go 1.25.0
 
 require (
 	fyne.io/fyne/v2 v2.7.4

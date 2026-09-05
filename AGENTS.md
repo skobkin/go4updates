@@ -59,7 +59,7 @@ Future UI integrations may use sibling nested modules such as `ui/charm` or
 
 ## Go and API Conventions
 
-- Go version: `1.27` unless the repository is deliberately retargeted.
+- Go version: `1.25` unless the repository is deliberately retargeted.
 - Run `gofmt` on all changed Go code.
 - Package names are short lowercase nouns.
 - Exported identifiers use standard Go naming conventions.
