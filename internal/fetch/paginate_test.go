@@ -85,7 +85,7 @@ func TestPaginateSingleShortPage(t *testing.T) {
 		versions: []string{"v1.2.0", "v1.1.0"},
 	})
 
-	releases, err := Paginate(context.Background(), 5, 100, server.fetchPage, keepAll, false)
+	releases, err := Paginate(t.Context(), 5, 100, server.fetchPage, keepAll, false)
 	if err != nil {
 		t.Fatalf("Paginate returned error: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestPaginateContinuesAfterFullPage(t *testing.T) {
 	)
 
 	// perPageMax of 2 makes the first page full.
-	releases, err := Paginate(context.Background(), 3, 2, server.fetchPage, keepAll, false)
+	releases, err := Paginate(t.Context(), 3, 2, server.fetchPage, keepAll, false)
 	if err != nil {
 		t.Fatalf("Paginate returned error: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestPaginateStopsAtLimit(t *testing.T) {
 		ages:     []time.Duration{time.Hour, 2 * time.Hour, 3 * time.Hour, 4 * time.Hour, 5 * time.Hour},
 	})
 
-	releases, err := Paginate(context.Background(), 2, 100, server.fetchPage, keepAll, false)
+	releases, err := Paginate(t.Context(), 2, 100, server.fetchPage, keepAll, false)
 	if err != nil {
 		t.Fatalf("Paginate returned error: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestPaginateKeepsPageSizeStable(t *testing.T) {
 		pageSpec{versions: []string{"v1.2.0", "v1.1.0"}, ages: []time.Duration{4 * time.Hour, 5 * time.Hour}},
 	)
 
-	releases, err := Paginate(context.Background(), 4, 3, server.fetchPage, convertDroppingDrafts, false)
+	releases, err := Paginate(t.Context(), 4, 3, server.fetchPage, convertDroppingDrafts, false)
 	if err != nil {
 		t.Fatalf("Paginate returned error: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestPaginatePrereleaseFiltering(t *testing.T) {
 		ages:     []time.Duration{time.Hour, 2 * time.Hour},
 	})
 
-	excluded, err := Paginate(context.Background(), 10, 100, server.fetchPage, keepAll, false)
+	excluded, err := Paginate(t.Context(), 10, 100, server.fetchPage, keepAll, false)
 	if err != nil {
 		t.Fatalf("Paginate returned error: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestPaginatePrereleaseFiltering(t *testing.T) {
 		t.Errorf("prereleases must be excluded by default: got %v", versions(excluded))
 	}
 
-	included, err := Paginate(context.Background(), 10, 100, server.fetchPage, keepAll, true)
+	included, err := Paginate(t.Context(), 10, 100, server.fetchPage, keepAll, true)
 	if err != nil {
 		t.Fatalf("Paginate returned error: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestPaginateSortsDefensively(t *testing.T) {
 		ages:     []time.Duration{3 * time.Hour, 2 * time.Hour, time.Hour},
 	})
 
-	releases, err := Paginate(context.Background(), 10, 100, server.fetchPage, keepAll, false)
+	releases, err := Paginate(t.Context(), 10, 100, server.fetchPage, keepAll, false)
 	if err != nil {
 		t.Fatalf("Paginate returned error: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestPaginateErrorPropagation(t *testing.T) {
 
 	// First page is full (perPageMax 1), so a second page is requested,
 	// which fails.
-	_, err := Paginate(context.Background(), 10, 1, server.fetchPage, keepAll, false)
+	_, err := Paginate(t.Context(), 10, 1, server.fetchPage, keepAll, false)
 	if err == nil {
 		t.Fatal("Paginate returned nil error, want provider failure")
 	}
@@ -236,7 +236,7 @@ func TestPaginateErrorPropagation(t *testing.T) {
 func TestPaginateEmptyFeed(t *testing.T) {
 	server := newPageServer(pageSpec{})
 
-	releases, err := Paginate(context.Background(), 5, 100, server.fetchPage, keepAll, false)
+	releases, err := Paginate(t.Context(), 5, 100, server.fetchPage, keepAll, false)
 	if err != nil {
 		t.Fatalf("Paginate returned error: %v", err)
 	}

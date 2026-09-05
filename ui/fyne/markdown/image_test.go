@@ -1,7 +1,6 @@
 package markdown
 
 import (
-	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -239,7 +238,7 @@ func TestLoadRejectsUnexpectedStatus(t *testing.T) {
 	loader := newImageLoader(Options{RemoteImages: true}.withDefaults())
 	source := testURI(t, server.URL+"/logo.png")
 
-	if _, err := loader.load(context.Background(), source); err == nil {
+	if _, err := loader.load(t.Context(), source); err == nil {
 		t.Fatal("expected an error for a non-2xx response")
 	}
 }
@@ -250,7 +249,7 @@ func TestLoadRejectsUndecodableBody(t *testing.T) {
 	loader := newImageLoader(Options{RemoteImages: true}.withDefaults())
 	source := testURI(t, server.URL+"/logo.png")
 
-	if _, err := loader.load(context.Background(), source); err == nil {
+	if _, err := loader.load(t.Context(), source); err == nil {
 		t.Fatal("expected an error for a body that is not an image")
 	}
 }
@@ -265,7 +264,7 @@ func TestLoadReportsImagesPastTheLimit(t *testing.T) {
 	loader := newImageLoader(Options{RemoteImages: true, MaxImageBytes: 4}.withDefaults())
 	source := testURI(t, server.URL+"/logo.png")
 
-	_, err := loader.load(context.Background(), source)
+	_, err := loader.load(t.Context(), source)
 	if !errors.Is(err, errImageTooLarge) {
 		t.Fatalf("expected errImageTooLarge, got %v", err)
 	}
@@ -280,7 +279,7 @@ func TestLoadRejectsOversizedDeclaredDimensions(t *testing.T) {
 	loader := newImageLoader(Options{RemoteImages: true}.withDefaults())
 	source := testURI(t, server.URL+"/logo.png")
 
-	_, err := loader.load(context.Background(), source)
+	_, err := loader.load(t.Context(), source)
 	if err == nil {
 		t.Fatal("expected an error for oversized declared image dimensions")
 	}

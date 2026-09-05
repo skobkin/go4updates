@@ -58,7 +58,7 @@ func TestCheckUpdateAvailable(t *testing.T) {
 		},
 	}}
 
-	result, err := NewChecker(CheckerOptions{}).Check(context.Background(), Target{
+	result, err := NewChecker(CheckerOptions{}).Check(t.Context(), Target{
 		CurrentVersion: "1.2.0",
 		Source:         source,
 	})
@@ -92,7 +92,7 @@ func TestCheckUpToDate(t *testing.T) {
 		Releases: []Release{testRelease("v1.3.0", time.Hour)},
 	}}
 
-	result, err := NewChecker(CheckerOptions{}).Check(context.Background(), Target{
+	result, err := NewChecker(CheckerOptions{}).Check(t.Context(), Target{
 		CurrentVersion: "v1.3.0",
 		Source:         source,
 	})
@@ -108,7 +108,7 @@ func TestCheckUpToDate(t *testing.T) {
 func TestCheckEmptyFeedIsNotAnError(t *testing.T) {
 	source := &stubSource{feed: Feed{RepositoryURL: "https://example.org/owner/repo"}}
 
-	result, err := NewChecker(CheckerOptions{}).Check(context.Background(), Target{
+	result, err := NewChecker(CheckerOptions{}).Check(t.Context(), Target{
 		CurrentVersion: "1.0.0",
 		Source:         source,
 	})
@@ -134,7 +134,7 @@ func TestCheckEmptyFeedIsNotAnError(t *testing.T) {
 }
 
 func TestCheckNilSource(t *testing.T) {
-	_, err := NewChecker(CheckerOptions{}).Check(context.Background(), Target{CurrentVersion: "1.0.0"})
+	_, err := NewChecker(CheckerOptions{}).Check(t.Context(), Target{CurrentVersion: "1.0.0"})
 	if !errors.Is(err, ErrNilSource) {
 		t.Fatalf("Check error = %v, want ErrNilSource", err)
 	}
@@ -144,7 +144,7 @@ func TestCheckFetchErrorIsWrapped(t *testing.T) {
 	fetchErr := errors.New("provider unavailable")
 	source := &stubSource{err: fetchErr}
 
-	result, err := NewChecker(CheckerOptions{}).Check(context.Background(), Target{
+	result, err := NewChecker(CheckerOptions{}).Check(t.Context(), Target{
 		CurrentVersion: "1.0.0",
 		Source:         source,
 	})
@@ -171,7 +171,7 @@ func TestCheckComparatorPrecedence(t *testing.T) {
 	// Target comparator wins over the checker comparator.
 	checker := NewChecker(CheckerOptions{Comparator: checkerComparator})
 
-	result, err := checker.Check(context.Background(), Target{
+	result, err := checker.Check(t.Context(), Target{
 		CurrentVersion: "0.1.0",
 		Source:         &stubSource{feed: feed},
 		Comparator:     targetComparator,
@@ -185,7 +185,7 @@ func TestCheckComparatorPrecedence(t *testing.T) {
 	}
 
 	// Checker comparator wins over the default.
-	result, err = checker.Check(context.Background(), Target{
+	result, err = checker.Check(t.Context(), Target{
 		CurrentVersion: "0.1.0",
 		Source:         &stubSource{feed: feed},
 	})
@@ -200,7 +200,7 @@ func TestCheckComparatorPrecedence(t *testing.T) {
 	// Default SemVer policy applies when nothing is configured.
 	plain := &Checker{}
 
-	result, err = plain.Check(context.Background(), Target{
+	result, err = plain.Check(t.Context(), Target{
 		CurrentVersion: "0.1.0",
 		Source:         &stubSource{feed: feed},
 	})
@@ -213,7 +213,7 @@ func TestCheckComparatorPrecedence(t *testing.T) {
 	}
 
 	// The default comparator reports unknown for uncomparable versions.
-	result, err = plain.Check(context.Background(), Target{
+	result, err = plain.Check(t.Context(), Target{
 		CurrentVersion: "dev",
 		Source:         &stubSource{feed: feed},
 	})
@@ -229,7 +229,7 @@ func TestCheckComparatorPrecedence(t *testing.T) {
 func TestZeroValueCheckerIsUsable(t *testing.T) {
 	var checker Checker
 
-	result, err := checker.Check(context.Background(), Target{
+	result, err := checker.Check(t.Context(), Target{
 		CurrentVersion: "1.0.0",
 		Source: &stubSource{feed: Feed{
 			Releases: []Release{testRelease("v2.0.0", time.Hour)},
@@ -253,7 +253,7 @@ func TestCheckAllPreservesOrderAndCount(t *testing.T) {
 		{CurrentVersion: "3.0.0", Source: &stubSource{feed: Feed{Releases: []Release{testRelease("v3.1.0", time.Hour)}}}},
 	}
 
-	outcomes := checker.CheckAll(context.Background(), targets)
+	outcomes := checker.CheckAll(t.Context(), targets)
 	if len(outcomes) != len(targets) {
 		t.Fatalf("len(outcomes) = %d, want %d", len(outcomes), len(targets))
 	}
@@ -286,7 +286,7 @@ func TestCheckAllPartialFailure(t *testing.T) {
 		{CurrentVersion: "3.0.0", Source: &stubSource{feed: Feed{Releases: []Release{testRelease("v3.1.0", time.Hour)}}}},
 	}
 
-	outcomes := checker.CheckAll(context.Background(), targets)
+	outcomes := checker.CheckAll(t.Context(), targets)
 
 	if outcomes[0].Err != nil || outcomes[2].Err != nil {
 		t.Fatalf("successful targets must not fail: %v, %v", outcomes[0].Err, outcomes[2].Err)
@@ -306,7 +306,7 @@ func TestCheckAllPartialFailure(t *testing.T) {
 }
 
 func TestCheckAllEmptyTargets(t *testing.T) {
-	outcomes := NewChecker(CheckerOptions{}).CheckAll(context.Background(), nil)
+	outcomes := NewChecker(CheckerOptions{}).CheckAll(t.Context(), nil)
 	if len(outcomes) != 0 {
 		t.Errorf("len(outcomes) = %d, want 0", len(outcomes))
 	}
@@ -315,7 +315,7 @@ func TestCheckAllEmptyTargets(t *testing.T) {
 func TestCheckAllCancellationFailsChecks(t *testing.T) {
 	checker := NewChecker(CheckerOptions{})
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
 	blocked := make(chan struct{})
@@ -363,7 +363,7 @@ func TestCheckAllDoesNotLeakGoroutines(t *testing.T) {
 		targets[i] = Target{CurrentVersion: "0.9.0", Source: source}
 	}
 
-	_ = checker.CheckAll(context.Background(), targets)
+	_ = checker.CheckAll(t.Context(), targets)
 
 	waitForGoroutineCount(t, baseline)
 }

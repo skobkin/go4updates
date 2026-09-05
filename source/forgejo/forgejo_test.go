@@ -229,7 +229,7 @@ func TestFetchSendsHeadersAndQuery(t *testing.T) {
 	rec := newRecordingServer(t, []releaseDTO{releaseDTOFor("v1.0.0", time.Hour)})
 	source := newTestSource(rec)
 
-	_, err := source.Fetch(context.Background(), updates.FetchOptions{Limit: 10})
+	_, err := source.Fetch(t.Context(), updates.FetchOptions{Limit: 10})
 	if err != nil {
 		t.Fatalf("Fetch returned error: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestFetchSortsNewestFirst(t *testing.T) {
 	})
 	source := newTestSource(rec)
 
-	feed, err := source.Fetch(context.Background(), updates.FetchOptions{})
+	feed, err := source.Fetch(t.Context(), updates.FetchOptions{})
 	if err != nil {
 		t.Fatalf("Fetch returned error: %v", err)
 	}
@@ -293,7 +293,7 @@ func TestFetchDropsDrafts(t *testing.T) {
 	rec := newRecordingServer(t, []releaseDTO{draft, releaseDTOFor("v1.0.0", 2*time.Hour)})
 	source := newTestSource(rec)
 
-	feed, err := source.Fetch(context.Background(), updates.FetchOptions{Limit: 10})
+	feed, err := source.Fetch(t.Context(), updates.FetchOptions{Limit: 10})
 	if err != nil {
 		t.Fatalf("Fetch returned error: %v", err)
 	}
@@ -310,7 +310,7 @@ func TestFetchPrereleaseFiltering(t *testing.T) {
 	rec := newRecordingServer(t, []releaseDTO{prerelease, releaseDTOFor("v1.2.0", 2*time.Hour)})
 	source := newTestSource(rec)
 
-	feed, err := source.Fetch(context.Background(), updates.FetchOptions{Limit: 10})
+	feed, err := source.Fetch(t.Context(), updates.FetchOptions{Limit: 10})
 	if err != nil {
 		t.Fatalf("Fetch returned error: %v", err)
 	}
@@ -322,7 +322,7 @@ func TestFetchPrereleaseFiltering(t *testing.T) {
 	rec2 := newRecordingServer(t, []releaseDTO{prerelease, releaseDTOFor("v1.2.0", 2*time.Hour)})
 	source2 := newTestSource(rec2)
 
-	feed, err = source2.Fetch(context.Background(), updates.FetchOptions{Limit: 10, IncludePrereleases: true})
+	feed, err = source2.Fetch(t.Context(), updates.FetchOptions{Limit: 10, IncludePrereleases: true})
 	if err != nil {
 		t.Fatalf("Fetch returned error: %v", err)
 	}
@@ -348,7 +348,7 @@ func TestFetchPaginatesUntilLimitSatisfied(t *testing.T) {
 	)
 	source := newTestSource(rec)
 
-	feed, err := source.Fetch(context.Background(), updates.FetchOptions{Limit: 2})
+	feed, err := source.Fetch(t.Context(), updates.FetchOptions{Limit: 2})
 	if err != nil {
 		t.Fatalf("Fetch returned error: %v", err)
 	}
@@ -370,7 +370,7 @@ func TestFetchCapsPerPageAtProviderMaximum(t *testing.T) {
 	rec := newRecordingServer(t, []releaseDTO{releaseDTOFor("v1.0.0", time.Hour)})
 	source := newTestSource(rec)
 
-	if _, err := source.Fetch(context.Background(), updates.FetchOptions{Limit: 500}); err != nil {
+	if _, err := source.Fetch(t.Context(), updates.FetchOptions{Limit: 500}); err != nil {
 		t.Fatalf("Fetch returned error: %v", err)
 	}
 
@@ -391,7 +391,7 @@ func TestFetchMapsAssets(t *testing.T) {
 	rec := newRecordingServer(t, []releaseDTO{release})
 	source := newTestSource(rec)
 
-	feed, err := source.Fetch(context.Background(), updates.FetchOptions{})
+	feed, err := source.Fetch(t.Context(), updates.FetchOptions{})
 	if err != nil {
 		t.Fatalf("Fetch returned error: %v", err)
 	}
@@ -420,7 +420,7 @@ func TestFetchPublishedAtFallsBackToCreatedAt(t *testing.T) {
 	rec := newRecordingServer(t, []releaseDTO{release})
 	source := newTestSource(rec)
 
-	feed, err := source.Fetch(context.Background(), updates.FetchOptions{})
+	feed, err := source.Fetch(t.Context(), updates.FetchOptions{})
 	if err != nil {
 		t.Fatalf("Fetch returned error: %v", err)
 	}
@@ -440,7 +440,7 @@ func TestFetchFeedURLsComeFromServerNotAPI(t *testing.T) {
 		t.Fatalf("New returned error: %v", err)
 	}
 
-	feed, err := source.Fetch(context.Background(), updates.FetchOptions{})
+	feed, err := source.Fetch(t.Context(), updates.FetchOptions{})
 	if err != nil {
 		t.Fatalf("Fetch returned error: %v", err)
 	}
@@ -460,7 +460,7 @@ func TestFetchPreservesReleaseFields(t *testing.T) {
 	rec := newRecordingServer(t, []releaseDTO{release})
 	source := newTestSource(rec)
 
-	feed, err := source.Fetch(context.Background(), updates.FetchOptions{})
+	feed, err := source.Fetch(t.Context(), updates.FetchOptions{})
 	if err != nil {
 		t.Fatalf("Fetch returned error: %v", err)
 	}
@@ -475,7 +475,7 @@ func TestFetchEmptyFeed(t *testing.T) {
 	rec := newRecordingServer(t, []releaseDTO{})
 	source := newTestSource(rec)
 
-	feed, err := source.Fetch(context.Background(), updates.FetchOptions{})
+	feed, err := source.Fetch(t.Context(), updates.FetchOptions{})
 	if err != nil {
 		t.Fatalf("Fetch returned error for empty feed: %v", err)
 	}
@@ -498,7 +498,7 @@ func TestFetchNon2xx(t *testing.T) {
 		t.Fatalf("New returned error: %v", err)
 	}
 
-	_, err = source.Fetch(context.Background(), updates.FetchOptions{})
+	_, err = source.Fetch(t.Context(), updates.FetchOptions{})
 
 	var statusErr *fetch.StatusError
 	if !errors.As(err, &statusErr) {
@@ -521,7 +521,7 @@ func TestFetchMalformedJSON(t *testing.T) {
 		t.Fatalf("New returned error: %v", err)
 	}
 
-	if _, err := source.Fetch(context.Background(), updates.FetchOptions{}); err == nil {
+	if _, err := source.Fetch(t.Context(), updates.FetchOptions{}); err == nil {
 		t.Fatal("Fetch returned nil error for malformed JSON")
 	}
 }
@@ -537,7 +537,7 @@ func TestFetchResponseTooLarge(t *testing.T) {
 		t.Fatalf("New returned error: %v", err)
 	}
 
-	_, err = source.Fetch(context.Background(), updates.FetchOptions{})
+	_, err = source.Fetch(t.Context(), updates.FetchOptions{})
 	if !errors.Is(err, fetch.ErrResponseTooLarge) {
 		t.Fatalf("error = %v, want ErrResponseTooLarge", err)
 	}
@@ -556,7 +556,7 @@ func TestFetchContextCancellation(t *testing.T) {
 		t.Fatalf("New returned error: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
 	defer cancel()
 
 	_, err = source.Fetch(ctx, updates.FetchOptions{})
@@ -569,7 +569,7 @@ func TestFetchNegativeLimit(t *testing.T) {
 	rec := newRecordingServer(t, []releaseDTO{})
 	source := newTestSource(rec)
 
-	if _, err := source.Fetch(context.Background(), updates.FetchOptions{Limit: -1}); err == nil {
+	if _, err := source.Fetch(t.Context(), updates.FetchOptions{Limit: -1}); err == nil {
 		t.Fatal("Fetch returned nil error for a negative limit")
 	}
 

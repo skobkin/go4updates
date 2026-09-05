@@ -188,11 +188,9 @@ func joinPath(base string, segments []string) string {
 
 // splitSegments splits a repository or URL path into its non-empty segments.
 func splitSegments(path string) []string {
-	parts := strings.Split(path, "/")
+	segments := make([]string, 0, strings.Count(path, "/")+1)
 
-	segments := make([]string, 0, len(parts))
-
-	for _, part := range parts {
+	for part := range strings.SplitSeq(path, "/") {
 		if part != "" {
 			segments = append(segments, part)
 		}

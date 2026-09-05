@@ -22,7 +22,7 @@ func TestDoJSONDecodesResponse(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
 	if err != nil {
 		t.Fatalf("building request: %v", err)
 	}
@@ -31,7 +31,7 @@ func TestDoJSONDecodesResponse(t *testing.T) {
 		Value int
 	}
 
-	if err := DoJSON(context.Background(), srv.Client(), req, &dst); err != nil {
+	if err := DoJSON(t.Context(), srv.Client(), req, &dst); err != nil {
 		t.Fatalf("DoJSON returned error: %v", err)
 	}
 
@@ -46,14 +46,14 @@ func TestDoJSONWorksWithNilClient(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
 	if err != nil {
 		t.Fatalf("building request: %v", err)
 	}
 
 	var dst []int
 
-	if err := DoJSON(context.Background(), nil, req, &dst); err != nil {
+	if err := DoJSON(t.Context(), nil, req, &dst); err != nil {
 		t.Fatalf("DoJSON with nil client returned error: %v", err)
 	}
 }
@@ -66,14 +66,14 @@ func TestDoJSONNon2xxReturnsStatusError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
 	if err != nil {
 		t.Fatalf("building request: %v", err)
 	}
 
 	var dst []int
 
-	err = DoJSON(context.Background(), srv.Client(), req, &dst)
+	err = DoJSON(t.Context(), srv.Client(), req, &dst)
 
 	var statusErr *StatusError
 	if !errors.As(err, &statusErr) {
@@ -106,14 +106,14 @@ func TestDoJSONRedactsURLCredentials(t *testing.T) {
 
 	target.User = url.UserPassword("deploy", "hunter2")
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, target.String(), nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, target.String(), nil)
 	if err != nil {
 		t.Fatalf("building request: %v", err)
 	}
 
 	var dst []int
 
-	err = DoJSON(context.Background(), srv.Client(), req, &dst)
+	err = DoJSON(t.Context(), srv.Client(), req, &dst)
 
 	statusErr, ok := err.(*StatusError)
 	if !ok {
@@ -135,14 +135,14 @@ func TestDoJSONMalformedJSON(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
 	if err != nil {
 		t.Fatalf("building request: %v", err)
 	}
 
 	var dst []int
 
-	if err := DoJSON(context.Background(), srv.Client(), req, &dst); err == nil {
+	if err := DoJSON(t.Context(), srv.Client(), req, &dst); err == nil {
 		t.Fatal("DoJSON returned nil error for malformed JSON")
 	}
 }
@@ -153,21 +153,21 @@ func TestDoJSONResponseTooLarge(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
 	if err != nil {
 		t.Fatalf("building request: %v", err)
 	}
 
 	var dst []int
 
-	err = DoJSON(context.Background(), srv.Client(), req, &dst)
+	err = DoJSON(t.Context(), srv.Client(), req, &dst)
 	if !errors.Is(err, ErrResponseTooLarge) {
 		t.Fatalf("error = %v, want ErrResponseTooLarge", err)
 	}
 }
 
 func TestDoJSONContextCancellation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
