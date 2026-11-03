@@ -339,6 +339,16 @@ func (i *Installer) installWindows(ctx context.Context, stagedPath, target, back
 // prepareStaged applies the final permission bits to the staged file and
 // syncs it, so the bytes published under the target name are complete and
 // durable before the rename.
+//
+// The final mode must carry an execute bit on Unix — the installed file has
+// to be runnable. It comes from [WithFileMode] or, when unset, from the
+// mode of the binary being replaced; an inherited mode without an execute
+// bit fails the install with the target untouched, naming the remedy.
+//
+// The writable handle is opened before the mode changes: opening a file for
+// writing after chmod 0555 fails with EACCES for unprivileged users, while
+// a handle already open keeps its access (permission is checked at open
+// time), so the sync below still works for read-only executable modes.
 func (i *Installer) prepareStaged(stagedPath, target string) error {
 	mode := fs.FileMode(0o755)
 
@@ -352,8 +362,8 @@ func (i *Installer) prepareStaged(stagedPath, target string) error {
 		}
 	}
 
-	if err := os.Chmod(stagedPath, mode); err != nil {
-		return fmt.Errorf("go4updates/selfupdate: setting mode on %s: %w", stagedPath, err)
+	if runtime.GOOS != "windows" && mode.Perm()&0o111 == 0 {
+		return fmt.Errorf("go4updates/selfupdate: %s has mode %v, which has no execute bit: the installed binary could not be run; set executable permission bits with WithFileMode or chmod the target", target, mode)
 	}
 
 	// The handle must be writable: on Windows, FlushFileBuffers (what
@@ -366,6 +376,10 @@ func (i *Installer) prepareStaged(stagedPath, target string) error {
 	}
 
 	defer func() { _ = f.Close() }()
+
+	if err := os.Chmod(stagedPath, mode); err != nil {
+		return fmt.Errorf("go4updates/selfupdate: setting mode on %s: %w", stagedPath, err)
+	}
 
 	if err := f.Sync(); err != nil {
 		return fmt.Errorf("go4updates/selfupdate: syncing %s: %w", stagedPath, err)

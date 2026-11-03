@@ -114,19 +114,22 @@ func TestInstallPreservesTargetMode(t *testing.T) {
 func TestInstallWithFileMode(t *testing.T) {
 	dir := t.TempDir()
 
-	t.Run("new target uses the configured mode", func(t *testing.T) {
-		target := filepath.Join(dir, "app-new")
-		i, err := NewInstaller(WithTargetPath(target), WithFileMode(0o640))
-		if err != nil {
-			t.Fatalf("NewInstaller: %v", err)
-		}
+	t.Run("read-only executable modes install as configured", func(t *testing.T) {
+		for _, mode := range []os.FileMode{0o555, 0o500, 0o755} {
+			target := filepath.Join(dir, fmt.Sprintf("app-mode-%o", mode))
 
-		if _, err := i.Install(t.Context(), stagedFile(t, dir, "v1")); err != nil {
-			t.Fatalf("Install: %v", err)
-		}
+			i, err := NewInstaller(WithTargetPath(target), WithFileMode(mode))
+			if err != nil {
+				t.Fatalf("NewInstaller(WithFileMode(%v)): %v", mode, err)
+			}
 
-		if mode := fileModeForTest(t, target); mode != 0o640 {
-			t.Errorf("mode = %v, want 0640", mode)
+			if _, err := i.Install(t.Context(), stagedFile(t, dir, "v1")); err != nil {
+				t.Fatalf("Install with mode %v: %v", mode, err)
+			}
+
+			if got := fileModeForTest(t, target); got != mode {
+				t.Errorf("mode = %v, want %v", got, mode)
+			}
 		}
 	})
 
@@ -147,6 +150,64 @@ func TestInstallWithFileMode(t *testing.T) {
 			t.Errorf("mode = %v, want 0755", mode)
 		}
 	})
+
+	t.Run("modes without an execute bit are rejected", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("Windows file names, not permission bits, decide executability")
+		}
+
+		for _, mode := range []fs.FileMode{0o640, 0o600, 0o644, 0o400} {
+			target := filepath.Join(dir, fmt.Sprintf("app-rejected-%o", mode))
+
+			_, err := NewInstaller(WithTargetPath(target), WithFileMode(mode))
+			if err == nil {
+				t.Errorf("WithFileMode(%v) should be rejected: it installs a binary nobody can execute", mode)
+
+				continue
+			}
+
+			if !strings.Contains(err.Error(), "execute") {
+				t.Errorf("WithFileMode(%v) error = %v, want it to mention the execute bit", mode, err)
+			}
+		}
+	})
+}
+
+// Installing over a non-executable target inherits its mode by default, so
+// the replaced binary would not be runnable either. The inherited mode is
+// validated like an explicit one: the install fails with the target
+// untouched and points at the remedy.
+func TestInstallRejectsNonExecutableInheritedMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows file names, not permission bits, decide executability")
+	}
+
+	dir := t.TempDir()
+
+	target := filepath.Join(dir, "app")
+	writeTarget(t, target, "v1", 0o644)
+
+	i := newTestInstaller(t, target)
+
+	if _, err := i.Install(t.Context(), stagedFile(t, dir, "v2")); err == nil {
+		t.Fatal("Install should fail when the inherited target mode has no execute bit")
+	} else if !strings.Contains(err.Error(), "execute") {
+		t.Errorf("Install error = %v, want it to mention the execute bit", err)
+	}
+
+	if got := readFileForTest(t, target); got != "v1" {
+		t.Errorf("target was modified by the failed install: %q", got)
+	}
+
+	if mode := fileModeForTest(t, target); mode != 0o644 {
+		t.Errorf("target mode = %v, want the untouched 0644", mode)
+	}
+
+	for _, e := range dirEntries(t, dir) {
+		if strings.Contains(e, ".go4updates.tmp") {
+			t.Errorf("leftover %q survived the failed install", e)
+		}
+	}
 }
 
 // Regression: the zero mode slipped through validation, and the installed

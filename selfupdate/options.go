@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"net/http"
 	"path/filepath"
+	"runtime"
 )
 
 // options carries the configuration shared by the selfupdate components.
@@ -106,14 +107,22 @@ func WithTargetPath(path string) Option {
 
 // WithFileMode sets the permission bits applied to the installed
 // executable. Without it, a replaced target keeps the mode of the binary it
-// replaces, and a newly created target is installed with 0755. Only
-// non-zero permission bits are accepted: the zero mode would install a
-// non-executable target whose permissions every following install would
-// inherit.
+// replaces, and a newly created target is installed with 0755.
+//
+// The installed file must stay runnable: on Unix, only modes carrying at
+// least one execute bit are accepted — a 0640-style binary cannot be exec'd
+// — and the same requirement is enforced on the mode inherited from the
+// target at install time. Read-only executables such as 0555 are valid.
+// Only non-zero permission bits are accepted: the zero mode would install a
+// target whose permissions every following install would inherit.
 func WithFileMode(mode fs.FileMode) Option {
 	return func(o *options) error {
 		if mode&^fs.ModePerm != 0 || mode.Perm() == 0 {
 			return fmt.Errorf("file mode must be non-zero permission bits, got %v", mode)
+		}
+
+		if runtime.GOOS != "windows" && mode.Perm()&0o111 == 0 {
+			return fmt.Errorf("file mode %v has no execute bit: the installed binary could not be run; read-only executables like 0555 are allowed", mode)
 		}
 
 		o.fileMode = mode
