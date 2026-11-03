@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -575,6 +576,88 @@ func TestExtractBinaryBombs(t *testing.T) {
 		err := extractBinary(path, "app_1.0.0_linux_amd64.zip", "app", "linux", dstPath, DefaultMaxExtractedBytes)
 		if !errors.Is(err, ErrExtractedTooLarge) {
 			t.Fatalf("err = %v, want ErrExtractedTooLarge for the entry flood", err)
+		}
+	})
+}
+
+// Regression: the entry cap was enforced only after zip.OpenReader had
+// walked the whole declared central directory, so an archive declaring
+// millions of entries paid the full parse before the cap could fire. The
+// declared count is now checked from the file tail before archive/zip sees
+// the archive. These archives are hand-built: a payload of junk followed by
+// end-of-central-directory records declaring far more entries than the file
+// could possibly contain.
+func TestExtractZipDeclaredEntryFloodRejectedBeforeParsing(t *testing.T) {
+	const junkLen = 64
+
+	writeFlood := func(t *testing.T, dir string, parts ...[]byte) string {
+		t.Helper()
+
+		var buf bytes.Buffer
+
+		buf.Write(make([]byte, junkLen))
+
+		for _, p := range parts {
+			buf.Write(p)
+		}
+
+		path := filepath.Join(dir, "flood.zip")
+
+		if err := os.WriteFile(path, buf.Bytes(), 0o600); err != nil {
+			t.Fatalf("writing hostile archive: %v", err)
+		}
+
+		return path
+	}
+
+	t.Run("declared through the zip64 record", func(t *testing.T) {
+		dir := t.TempDir()
+
+		zip64 := make([]byte, 56)
+
+		binary.LittleEndian.PutUint32(zip64[0:], 0x06064b50) // zip64 EOCD signature
+		binary.LittleEndian.PutUint64(zip64[4:], 44)         // size of the remaining record
+		binary.LittleEndian.PutUint64(zip64[32:], 5_000_000) // total entry count
+		// directorySize (+40) and directoryOffset (+48) stay zero.
+
+		loc := make([]byte, 20)
+
+		binary.LittleEndian.PutUint32(loc[0:], 0x07064b50) // zip64 locator signature
+		binary.LittleEndian.PutUint64(loc[8:], junkLen)    // zip64 EOCD offset
+		binary.LittleEndian.PutUint32(loc[16:], 1)         // total disks
+
+		eocd := make([]byte, 22)
+
+		binary.LittleEndian.PutUint32(eocd[0:], 0x06054b50) // EOCD signature
+		binary.LittleEndian.PutUint16(eocd[8:], 0xffff)     // entries on this disk
+		binary.LittleEndian.PutUint16(eocd[10:], 0xffff)    // total entries: the zip64 trigger
+		// directorySize (+12) and directoryOffset (+16) stay zero.
+
+		path := writeFlood(t, dir, zip64, loc, eocd)
+
+		dstPath := filepath.Join(dir, "staged")
+
+		err := extractBinary(path, "app_1.0.0_linux_amd64.zip", "app", "linux", dstPath, DefaultMaxExtractedBytes)
+		if !errors.Is(err, ErrExtractedTooLarge) {
+			t.Fatalf("err = %v, want ErrExtractedTooLarge for the zip64-declared flood", err)
+		}
+	})
+
+	t.Run("declared through the plain EOCD count", func(t *testing.T) {
+		dir := t.TempDir()
+
+		eocd := make([]byte, 22)
+
+		binary.LittleEndian.PutUint32(eocd[0:], 0x06054b50) // EOCD signature
+		binary.LittleEndian.PutUint16(eocd[10:], maxArchiveEntries+1)
+
+		path := writeFlood(t, dir, eocd)
+
+		dstPath := filepath.Join(dir, "staged")
+
+		err := extractBinary(path, "app_1.0.0_linux_amd64.zip", "app", "linux", dstPath, DefaultMaxExtractedBytes)
+		if !errors.Is(err, ErrExtractedTooLarge) {
+			t.Fatalf("err = %v, want ErrExtractedTooLarge for the EOCD-declared flood", err)
 		}
 	})
 }

@@ -4,8 +4,10 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"compress/gzip"
+	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path"
 	"strconv"
@@ -16,6 +18,130 @@ import (
 // archives ship a handful of files; thousands of entries are a
 // resource-exhaustion attack, not a release layout.
 const maxArchiveEntries = 1024
+
+// Zip end-of-central-directory structure offsets, used only by the declared
+// entry count pre-parse. The record is fixed-size and little-endian, so it
+// is decoded by hand instead of pulling the whole central directory through
+// archive/zip first.
+const (
+	zipEOCDSignature      = 0x06054b50 // "PK\x05\x06"
+	zip64LocatorSignature = 0x07064b50 // "PK\x06\x07"
+	zip64EOCDSignature    = 0x06064b50 // "PK\x06\x06"
+
+	zipEOCDLen            = 22
+	zip64LocatorLen       = 20
+	zip64EOCDLen          = 56
+	zipCommentMaxLen      = 65535
+	zipEOCDTotalEntries   = 10 // uint16: total central-directory entries
+	zipEOCDCommentLen     = 20 // uint16: comment length
+	zip64LocatorEOCDOff   = 8  // uint64: offset of the zip64 EOCD record
+	zip64EOCDTotalEntries = 32 // uint64: total central-directory entries
+	zip64EOCDDirSize      = 40 // uint64: central directory size
+	zip64EOCDDirOffset    = 48 // uint64: central directory offset
+)
+
+// zipDeclaredEntryCount reads the total entry count declared in the
+// archive's end-of-central-directory record from the file tail, without
+// parsing the central directory itself. The zip64 record supersedes the
+// 16-bit count when a well-formed locator points at it. ok is false when no
+// plausible EOCD can be located or decoded: the caller then falls through to
+// archive/zip, which reports the format problem itself.
+//
+// It exists so the caller can reject an archive that declares more entries
+// than the limit before archive/zip walks the directory: OpenReader parses
+// every declared record before the parsed count could be checked, which is
+// exactly the resource cost a hostile declared count tries to extract.
+func zipDeclaredEntryCount(archivePath string) (n int64, ok bool) {
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return 0, false
+	}
+
+	defer func() { _ = f.Close() }()
+
+	info, err := f.Stat()
+	if err != nil {
+		return 0, false
+	}
+
+	// The EOCD is at most its fixed length plus a maximum comment away from
+	// the end of the file.
+	tailLen := int64(zipEOCDLen + zipCommentMaxLen)
+
+	if size := info.Size(); size < tailLen {
+		tailLen = size
+	}
+
+	tail := make([]byte, tailLen)
+
+	if _, err := f.ReadAt(tail, info.Size()-tailLen); err != nil {
+		return 0, false
+	}
+
+	// Scan backward like archive/zip: the record closest to the end wins,
+	// signatures inside a comment lose to the real record.
+	for i := len(tail) - zipEOCDLen; i >= 0; i-- {
+		if binary.LittleEndian.Uint32(tail[i:]) != zipEOCDSignature {
+			continue
+		}
+
+		count := int64(binary.LittleEndian.Uint16(tail[i+zipEOCDTotalEntries:]))
+
+		// A zip64 locator directly precedes the EOCD and points at a zip64
+		// EOCD record whose 64-bit count supersedes the 16-bit one.
+		if i >= zip64LocatorLen && binary.LittleEndian.Uint32(tail[i-zip64LocatorLen:]) == zip64LocatorSignature {
+			if c, ok := zip64DeclaredEntryCount(f, tail[i-zip64LocatorLen+zip64LocatorEOCDOff:]); ok {
+				count = c
+			}
+		}
+
+		// Sanity-check the record the way archive/zip does before trusting
+		// anything from it, so junk inside a comment cannot smuggle in a
+		// count: the comment must span the rest of the tail, and the
+		// directory it describes must fit inside the file.
+		dirEnd := info.Size() - tailLen + int64(i)
+		dirSize := int64(binary.LittleEndian.Uint32(tail[i+12:]))
+
+		if binary.LittleEndian.Uint16(tail[i+zipEOCDCommentLen:]) != uint16(len(tail)-i-zipEOCDLen) ||
+			dirSize > dirEnd || dirEnd-dirSize+int64(binary.LittleEndian.Uint32(tail[i+16:])) >= info.Size() {
+			return 0, false
+		}
+
+		return count, true
+	}
+
+	return 0, false
+}
+
+// zip64DeclaredEntryCount reads the 64-bit total entry count from the zip64
+// EOCD record at the offset carried in locatorOff (an 8-byte little-endian
+// slice taken from a zip64 locator). ok is false when the offset is out of
+// range or the record there is not a zip64 EOCD.
+func zip64DeclaredEntryCount(f *os.File, locatorOff []byte) (int64, bool) {
+	off := binary.LittleEndian.Uint64(locatorOff)
+	if off > uint64(math.MaxInt64) {
+		return 0, false
+	}
+
+	rec := make([]byte, zip64EOCDLen)
+
+	if _, err := f.ReadAt(rec, int64(off)); err != nil {
+		return 0, false
+	}
+
+	if binary.LittleEndian.Uint32(rec) != zip64EOCDSignature {
+		return 0, false
+	}
+
+	dirSize := binary.LittleEndian.Uint64(rec[zip64EOCDDirSize:])
+	dirOffset := binary.LittleEndian.Uint64(rec[zip64EOCDDirOffset:])
+
+	if dirSize > math.MaxInt64 || dirOffset > math.MaxInt64 {
+		return 0, false
+	}
+
+	return int64(binary.LittleEndian.Uint64(rec[zip64EOCDTotalEntries:])), true
+}
 
 // DefaultMaxExtractedBytes bounds the size of the extracted executable when
 // no limit is configured with [WithMaxExtractedBytes]. It is enforced while
@@ -214,6 +340,14 @@ func scanZip(files []*zip.File, executable string) zipScan {
 // members are randomly accessible, so selection happens first and the chosen
 // member is streamed second.
 func extractFromZip(archivePath, executable, dstPath string, maxExtracted int64) error {
+	// Reject archives that declare more entries than the limit before
+	// archive/zip walks the declared directory. When the declaration cannot
+	// be read, OpenReader reports the format problem itself.
+	if declared, ok := zipDeclaredEntryCount(archivePath); ok && declared > maxArchiveEntries {
+		return fmt.Errorf("%w: archive declares %d entries, limit is %d",
+			ErrExtractedTooLarge, declared, maxArchiveEntries)
+	}
+
 	reader, err := zip.OpenReader(archivePath)
 	if err != nil {
 		return fmt.Errorf("go4updates/selfupdate: opening zip archive: %w", err)
