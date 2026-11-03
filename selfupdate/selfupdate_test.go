@@ -573,33 +573,35 @@ func TestUpdaterCleanupRetiresBackup(t *testing.T) {
 	}
 }
 
-// Regression: the default matcher tokenizes asset names on "_" and "-", so
-// an application name containing either separator can never match an asset
-// and every Apply would fail with ErrNoMatchingAsset listing conventional
-// assets. The misconfiguration is rejected at construction, with a pointer
-// to the escape hatch, instead of failing silently at first Apply.
-func TestNewRejectsSeparatorAppNameWithDefaultMatcher(t *testing.T) {
+// The default matcher matches the complete application name — separators
+// included — against the opening of the asset file name, so names like
+// "example-app" construct an Updater and select conventional GoReleaser
+// assets instead of being rejected at construction.
+func TestNewAcceptsSeparatorAppName(t *testing.T) {
 	abs := filepath.Join(t.TempDir(), "app")
 
-	for _, name := range []string{"my-app", "my_app"} {
-		_, err := New(WithTargetPath(abs), WithAppName(name))
-		if err == nil {
-			t.Errorf("New(WithAppName(%q)) should fail while the default matcher is in use", name)
-
-			continue
+	for _, name := range []string{"example-app", "mesh_map", "amdgputop-web"} {
+		u, err := New(WithTargetPath(abs), WithAppName(name))
+		if err != nil {
+			t.Fatalf("New(WithAppName(%q)): %v", name, err)
 		}
 
-		if !strings.Contains(err.Error(), "WithAssetMatcher") {
-			t.Errorf("New(WithAppName(%q)) error %v should point at WithAssetMatcher", name, err)
+		release := updates.Release{
+			Version: "1.2.3",
+			Assets: []updates.Asset{
+				{Name: name + "-1.2.3-" + runtime.GOOS + "-" + runtime.GOARCH + ".zip"},
+				{Name: "other-app_1.2.3_" + runtime.GOOS + "_" + runtime.GOARCH + ".zip"},
+			},
 		}
-	}
 
-	// A custom matcher makes separator names legitimate: the name is also
-	// used for exact archive-member lookup, which has no separator issue.
-	custom := func(updates.Asset) bool { return true }
+		asset, err := u.SelectAsset(release)
+		if err != nil {
+			t.Fatalf("SelectAsset for %q: %v", name, err)
+		}
 
-	if _, err := New(WithTargetPath(abs), WithAppName("my-app"), WithAssetMatcher(custom)); err != nil {
-		t.Errorf("New with a custom matcher: %v", err)
+		if asset.Name != name+"-1.2.3-"+runtime.GOOS+"-"+runtime.GOARCH+".zip" {
+			t.Errorf("SelectAsset for %q picked %q, want the separator-named asset", name, asset.Name)
+		}
 	}
 }
 

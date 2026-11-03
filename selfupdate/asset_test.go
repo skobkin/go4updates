@@ -96,7 +96,6 @@ func TestMatchAssetName(t *testing.T) {
 
 		// Degenerate inputs.
 		{name: "empty asset", asset: "", app: "app", goos: "linux", goarch: "amd64", wantMatch: false},
-		{name: "app with separator", asset: "my-app_1.2.3_linux_amd64.tar.gz", app: "my-app", goos: "linux", goarch: "amd64", wantMatch: false},
 	}
 
 	for _, tt := range tests {
@@ -129,6 +128,68 @@ func TestMatchAssetNameAppNamedLikePlatformAlias(t *testing.T) {
 
 		// The alias claim must not excuse a missing platform token.
 		{asset: "mac_amd64.zip", app: "mac", goos: "darwin", goarch: "amd64", wantMatch: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.asset, func(t *testing.T) {
+			got := MatchAssetName(tt.asset, tt.app, tt.goos, tt.goarch)
+			if got != tt.wantMatch {
+				t.Fatalf("MatchAssetName(%q, %q, %q, %q) = %v, want %v",
+					tt.asset, tt.app, tt.goos, tt.goarch, got, tt.wantMatch)
+			}
+		})
+	}
+}
+
+// Application names containing the layout's token separators ("_" and "-")
+// are matched as a whole against the opening of the file name, followed by
+// a separator and the usual version/platform suffix. These are real-world
+// shapes: hyphenated CLI names, "lite" suffixed tools, and underscore
+// compound names.
+func TestMatchAssetNameWithSeparatorsInAppName(t *testing.T) {
+	tests := []struct {
+		asset     string
+		app       string
+		goos      string
+		goarch    string
+		wantMatch bool
+	}{
+		// Hyphenated names, underscore- and dash-joined GoReleaser layouts.
+		{asset: "example-app_1.2.3_linux_amd64.tar.gz", app: "example-app", goos: "linux", goarch: "amd64", wantMatch: true},
+		{asset: "example-app-1.2.3-linux-amd64.tar.gz", app: "example-app", goos: "linux", goarch: "amd64", wantMatch: true},
+		{asset: "example-app_1.2.3_windows_amd64.zip", app: "example-app", goos: "windows", goarch: "amd64", wantMatch: true},
+		{asset: "example-app-1.2.3-darwin-arm64.zip", app: "example-app", goos: "darwin", goarch: "arm64", wantMatch: true},
+
+		// Underscore compound names.
+		{asset: "mesh_map_1.0.0_linux_amd64.tar.gz", app: "mesh_map", goos: "linux", goarch: "amd64", wantMatch: true},
+		{asset: "mesh_map-2.0.0-windows-amd64.zip", app: "mesh_map", goos: "windows", goarch: "amd64", wantMatch: true},
+		{asset: "my_tool_1.2.3_linux_amd64", app: "my_tool", goos: "linux", goarch: "amd64", wantMatch: true},
+
+		// Reviewer-reported real application names.
+		{asset: "meshmap-lite_1.0.0_windows_amd64.zip", app: "meshmap-lite", goos: "windows", goarch: "amd64", wantMatch: true},
+		{asset: "meshmap-lite_2.0.0_darwin_arm64.tar.gz", app: "meshmap-lite", goos: "darwin", goarch: "arm64", wantMatch: true},
+		{asset: "amdgputop-web_0.5.1_linux_amd64.tar.gz", app: "amdgputop-web", goos: "linux", goarch: "amd64", wantMatch: true},
+		{asset: "amdgputop-web-0.5.1-linux-amd64.tar.gz", app: "amdgputop-web", goos: "linux", goarch: "amd64", wantMatch: true},
+
+		// Wrong platform still fails for separator names.
+		{asset: "example-app_1.2.3_linux_386.tar.gz", app: "example-app", goos: "linux", goarch: "amd64", wantMatch: false},
+		{asset: "amdgputop-web_0.5.1_windows_amd64.zip", app: "amdgputop-web", goos: "linux", goarch: "amd64", wantMatch: false},
+
+		// The name is never matched as a mere prefix: the character after the
+		// application name must be a token separator, and a longer name with
+		// an extra token is a different application's asset.
+		{asset: "application_1.2.3_linux_amd64.tar.gz", app: "app", goos: "linux", goarch: "amd64", wantMatch: false},
+		{asset: "example-app-next_1.2.3_linux_amd64.tar.gz", app: "example-app", goos: "linux", goarch: "amd64", wantMatch: false},
+		{asset: "examples-app_1.2.3_linux_amd64.tar.gz", app: "example-app", goos: "linux", goarch: "amd64", wantMatch: false},
+		{asset: "my-tool_1.2.3_linux_amd64.tar.gz", app: "my_tool", goos: "linux", goarch: "amd64", wantMatch: false},
+
+		// Version labels between the application name and the platform
+		// tokens stay tolerated, including pre-release suffixes.
+		{asset: "example-app_v2.0.0-rc1_linux_amd64.tar.gz", app: "example-app", goos: "linux", goarch: "amd64", wantMatch: true},
+		{asset: "amdgputop-web_0.5.1-nightly_linux_amd64.tar.gz", app: "amdgputop-web", goos: "linux", goarch: "amd64", wantMatch: true},
+
+		// An unknown token after a separator name still fails conservatively.
+		{asset: "example-app_1.2.3_musl_linux_amd64.tar.gz", app: "example-app", goos: "linux", goarch: "amd64", wantMatch: false},
 	}
 
 	for _, tt := range tests {

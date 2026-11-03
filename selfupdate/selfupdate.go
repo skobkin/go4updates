@@ -84,16 +84,6 @@ func New(opts ...Option) (*Updater, error) {
 		return nil, errors.New("go4updates/selfupdate: application name is empty")
 	}
 
-	// The default matcher tokenizes asset names on "_" and "-", so an
-	// application name containing either could never match an asset. Reject
-	// the misconfiguration here, with the escape hatch, instead of failing
-	// with a confusing ErrNoMatchingAsset on the first Apply. A custom
-	// matcher lifts the restriction: the name is also used for exact
-	// archive-member lookup, which has no separator issue.
-	if o.assetMatcher == nil && strings.ContainsAny(appName, "_-") {
-		return nil, fmt.Errorf("go4updates/selfupdate: application name %q contains '_' or '-', which the default asset matcher cannot match; provide a custom matcher with WithAssetMatcher", appName)
-	}
-
 	matcher := o.assetMatcher
 	if matcher == nil {
 		matcher = DefaultAssetMatcher(appName)

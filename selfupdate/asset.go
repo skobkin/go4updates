@@ -132,18 +132,17 @@ var archAliases = map[string][]string{
 //
 //	{app}[_{-}{version}]_{os}_{arch}[.{archive-ext}]
 //
-// Tokens are the parts of the name split on "_" and "-". The application,
-// operating system, and architecture tokens must all be present, in the
-// documented order: the application token first, the platform tokens last
-// in os-then-arch order; names that shuffle the roles do not match. Further
-// tokens are tolerated between them only when they look like version labels
-// ("1.2.3", "v2", "1.0.0-rc1", "1.2.3-nightly"). OS and architecture tokens
+// The file name (without its archive extension) must start with the
+// complete application name, which may itself contain "_" and "-" (for
+// example "example-app" or "mesh_map"), followed by a token separator and
+// then the platform tokens last in os-then-arch order. Version labels are
+// tolerated between the application name and the platform tokens ("1.2.3",
+// "v2", "1.0.0-rc1", "1.2.3-nightly"). Names that shuffle the roles do not
+// match, and an application name is never matched as a mere prefix: the
+// next character after it must be a token separator, so "application_..."
+// does not match an application named "app". OS and architecture tokens
 // are matched through the alias tables (for example "macos" and "osx" for
-// "darwin", "x86_64" for "amd64"). When the application name itself equals
-// a platform alias token, that token is claimed as the application name and
-// the platform token is expected later, where the convention places it.
-// Token comparison is exact after lowercasing, so an application name
-// containing "_" or "-" never matches.
+// "darwin", "x86_64" for "amd64"); comparison is exact after lowercasing.
 //
 // Checksum, signature, manifest, SBOM, and documentation file names never
 // match: their file-name extensions and trailing tokens are not part of the
@@ -185,32 +184,37 @@ func MatchAssetName(name, appName, goos, goarch string) bool {
 	}
 
 	app := strings.ToLower(appName)
-	if strings.ContainsAny(app, "_-") {
+
+	// The complete application name — separators included — opens the file
+	// name. Requiring a separator (or the end of the name) right after it
+	// keeps "application_..." from matching an application named "app",
+	// while "app_...", "app-..." and "app" itself all reach the platform
+	// parse below.
+	if !strings.HasPrefix(base, app) {
 		return false
 	}
 
+	rest := base[len(app):]
+
+	if rest != "" {
+		if rest[0] != '_' && rest[0] != '-' {
+			return false
+		}
+
+		rest = rest[1:]
+	}
+
 	var (
-		foundApp, foundOS, foundArch bool
-		appIdx, osIdx, archIdx       int
+		foundOS, foundArch bool
+		osIdx, archIdx     int
 	)
 
-	tokens := strings.FieldsFunc(base, func(r rune) bool {
+	tokens := strings.FieldsFunc(rest, func(r rune) bool {
 		return r == '_' || r == '-'
 	})
 
 	for i := 0; i < len(tokens); i++ {
 		tok := tokens[i]
-
-		// The application token is claimed first: an application named like
-		// a platform alias ("mac", "linux", "arm") keeps its token, and the
-		// convention places the platform token after it anyway. A later
-		// equal token falls through to the platform checks.
-		if !foundApp && tok == app {
-			foundApp = true
-			appIdx = i
-
-			continue
-		}
 
 		if slices.Contains(wantOS, tok) {
 			if !foundOS {
@@ -231,8 +235,8 @@ func MatchAssetName(name, appName, goos, goarch string) bool {
 		}
 
 		if versionish(tok) {
-			// Version labels are tolerated between the application and
-			// platform tokens or after them.
+			// Version labels are tolerated between the application name and
+			// the platform tokens or after them.
 			continue
 		}
 
@@ -295,10 +299,10 @@ func MatchAssetName(name, appName, goos, goarch string) bool {
 	}
 
 	// The convention is {app}[_{-}{version}]_{os}_{arch}: the application
-	// token first, the platform tokens last in os-then-arch order. Names
+	// name first, the platform tokens last in os-then-arch order. Names
 	// shuffling the roles are outside the convention and fail
 	// conservatively.
-	return foundApp && foundOS && foundArch && appIdx < osIdx && osIdx < archIdx
+	return foundOS && foundArch && osIdx < archIdx
 }
 
 // versionish reports whether a token looks like a version or build label,

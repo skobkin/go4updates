@@ -500,9 +500,12 @@ The default matcher expects goreleaser-style names:
 {app}[_{-}{version}]_{os}_{arch}[.{archive-ext}]
 ```
 
-The token order is enforced: the application token must come first, and the
-platform tokens last in os-then-arch order. OS and architecture tokens are
-matched through alias tables (`macos`/`osx` for
+The application name — `_` and `-` included, so `example-app` and
+`mesh_map` work — opens the file name, followed by optional version labels
+and the platform tokens last in os-then-arch order. An application name is
+never matched as a mere prefix: the next character after it must be a token
+separator, so `application_…` does not match an application named `app`. OS
+and architecture tokens are matched through alias tables (`macos`/`osx` for
 `darwin`, `x86_64`/`x64` for `amd64`, `i386`/`x86` for `386`, `aarch64` for
 `arm64`, `armv6`/`armv7` for `arm`, `win32`/`win64` for `windows`). Supported
 archive extensions: `.zip`, `.tar.gz`, `.tgz`, `.tar`, `.gz`, and raw binaries
@@ -518,10 +521,7 @@ rule applies to members inside archives (`ErrAmbiguousExecutable`). Use
 
 Limitations worth knowing: Go does not report which ARM variant a binary was
 built for, so publishers shipping separate `armv6` and `armv7` assets need a
-custom matcher; unmapped platforms (`freebsd`, `riscv64`, …) never match; and
-application names containing `_` or `-` cannot be matched by the default
-matcher — `New` rejects such a name at construction and points at
-`WithAssetMatcher`, which lifts the restriction.
+custom matcher, and unmapped platforms (`freebsd`, `riscv64`, …) never match.
 
 ### Making self-update opt-in at build time
 
