@@ -156,9 +156,11 @@ const DefaultMaxExtractedBytes int64 = 512 << 20 // 512 MiB
 // [ErrUnsupportedArchive] before the archive is opened.
 //
 // The executable is located by base-name comparison against the executable
-// name derived from appName and goos, at any archive depth. Member names are
-// only ever compared, never used to construct output paths, so path
-// traversal in archive entries ("zip slip") cannot escape dstPath.
+// name derived from appName and goos, at any archive depth. Zip member
+// paths that use backslash separators are normalized before the comparison.
+// Member names are only ever compared, never used to construct output
+// paths, so path traversal in archive entries ("zip slip") cannot escape
+// dstPath.
 // Directories are skipped; a non-regular entry (symlink, device) whose base
 // name matches the executable disqualifies the archive — bytes are never
 // extracted through a link. Several qualifying members are an ambiguity
@@ -306,7 +308,11 @@ func scanZip(files []*zip.File, executable string) zipScan {
 			continue
 		}
 
-		base := path.Base(f.Name)
+		// Archives authored on Windows separate path elements with
+		// backslashes; normalize so the base-name comparison sees them.
+		name := strings.ReplaceAll(f.Name, "\\", "/")
+
+		base := path.Base(name)
 
 		if info.Mode()&os.ModeType != 0 {
 			// Symlinks, devices, and other special members are never
@@ -329,7 +335,7 @@ func scanZip(files []*zip.File, executable string) zipScan {
 		}
 
 		if base == executable {
-			scan.candidates = append(scan.candidates, zipCandidate{file: f, name: f.Name})
+			scan.candidates = append(scan.candidates, zipCandidate{file: f, name: name})
 		}
 	}
 

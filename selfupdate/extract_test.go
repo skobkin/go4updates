@@ -661,3 +661,27 @@ func TestExtractZipDeclaredEntryFloodRejectedBeforeParsing(t *testing.T) {
 		}
 	})
 }
+
+// Regression: zip members authored on Windows separate path elements with
+// backslashes, but path.Base only splits on "/", so the member name was
+// compared as a whole and the executable was reported missing even though it
+// was unambiguous. The second regular file defeats the single-file fallback
+// that would otherwise have masked the bug.
+func TestExtractZipWindowsBackslashMember(t *testing.T) {
+	dir := t.TempDir()
+
+	path := buildZip(t, dir, []zipEntry{
+		{name: `Sub\app.exe`, content: "payload"},
+		{name: "README.txt", content: "readme"},
+	})
+
+	dstPath := filepath.Join(dir, "staged")
+
+	if err := extractBinary(path, "app_1.0.0_windows_amd64.zip", "app", "windows", dstPath, DefaultMaxExtractedBytes); err != nil {
+		t.Fatalf("extractBinary: %v", err)
+	}
+
+	if got := readFileForTest(t, dstPath); got != "payload" {
+		t.Errorf("extracted content = %q, want payload", got)
+	}
+}
