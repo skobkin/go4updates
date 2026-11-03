@@ -160,12 +160,14 @@ func (u *Updater) SelectAsset(release updates.Release) (updates.Asset, error) {
 //
 // Failure semantics: when Apply returns an error and errors.Is does not
 // find [ErrReplaced] in it, nothing was modified and the returned Applied
-// is meaningless; with [ErrReplaced], the replacement itself took effect and
-// the returned Applied describes it, the error concerning post-replacement
-// work only. Staging files are removed on every failure path; on success
-// the previous binary remains under Applied.Backup until the application
-// calls [Updater.Cleanup] — after initialization or a health check, never
-// before.
+// is meaningless; with [ErrReplaced], the attempt changed the target name —
+// the replacement took effect, or (a documented Windows failure shape) the
+// target was moved aside and could not be restored — and the returned
+// Applied describes the paths involved; run [Updater.Cleanup] to recover a
+// consistent state before retrying. Staging files are removed on every
+// failure path; on success the previous binary remains under Applied.Backup
+// until the application calls [Updater.Cleanup] — after initialization or a
+// health check, never before.
 func (u *Updater) Apply(ctx context.Context, result updates.Result) (Applied, error) {
 	if result.Latest == nil {
 		return Applied{}, ErrNoRelease

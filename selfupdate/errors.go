@@ -62,10 +62,14 @@ var (
 	// [Installer.Cleanup] to retire it, then retry.
 	ErrBackupExists = errors.New("go4updates/selfupdate: backup of the previous executable already exists")
 
-	// ErrReplaced reports that the executable replacement itself succeeded
-	// before the error being reported, which concerns post-replacement work
-	// only (for example a directory sync failure). When errors.Is finds it,
-	// the installed binary is the new one; otherwise a failed install left
-	// the target untouched.
+	// ErrReplaced reports that the attempt changed the target name before
+	// the error being reported: either the replacement itself succeeded and
+	// the error concerns post-replacement work only (for example a
+	// directory sync failure), or — the Windows restore-failure paths — the
+	// target was moved aside and could not be restored, so the target path
+	// is missing and the returned backup path holds the old executable.
+	// When errors.Is finds it, the target is not necessarily the old
+	// binary: run [Installer.Cleanup] to recover a consistent state before
+	// retrying. Otherwise a failed install left the target untouched.
 	ErrReplaced = errors.New("go4updates/selfupdate: executable was replaced before the failure")
 )

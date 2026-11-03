@@ -140,11 +140,16 @@ func resolveSymlinks(target string) string {
 // remains, and installing over that state would strand the backup.
 //
 // Failure semantics: when Install returns an error, the target was left
-// untouched unless errors.Is(err, [ErrReplaced]) — that sentinel reports a
-// replacement that already took effect, with the error concerning
-// post-replacement work only. A backup created by this failed attempt is
-// removed again so a retry is not blocked by [ErrBackupExists]; a
-// pre-existing backup is never created, written, or removed by Install.
+// untouched unless errors.Is(err, [ErrReplaced]) — that sentinel reports
+// that the attempt changed the target name before the failure: either the
+// replacement already took effect (the error concerns post-replacement
+// work only), or — the Windows restore-failure paths — the target was
+// moved aside and could not be restored, so the target path is missing
+// and the returned backup path holds the old executable; in both shapes
+// [Installer.Cleanup] recovers a consistent state before a retry. A
+// backup created by this failed attempt is removed again so a retry is
+// not blocked by [ErrBackupExists]; a pre-existing backup is never
+// created, written, or removed by Install.
 func (i *Installer) Install(ctx context.Context, stagedPath string) (backupPath string, err error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
@@ -293,8 +298,12 @@ func (i *Installer) installWindows(ctx context.Context, stagedPath, target, back
 	if err := ctx.Err(); err != nil {
 		// Restore the old binary: the target path must not stay missing.
 		if rerr := i.renameFn(backup, target); rerr != nil {
-			return "", fmt.Errorf("go4updates/selfupdate: install canceled: %w; restoring %s also failed: %w; recover manually: move %s %s",
-				err, backup, rerr, backup, target)
+			// The target is missing and could not be restored, so the
+			// "target untouched" contract cannot be honored: report the
+			// displaced state through [ErrReplaced] and return the backup
+			// path so the caller can recover.
+			return backup, fmt.Errorf("%w: install canceled; restoring %s also failed: %w; recover manually: move %s %s",
+				ErrReplaced, backup, rerr, backup, target)
 		}
 
 		return "", fmt.Errorf("go4updates/selfupdate: install canceled: %w (original restored)", err)
@@ -302,8 +311,10 @@ func (i *Installer) installWindows(ctx context.Context, stagedPath, target, back
 
 	if err := i.renameFn(stagedPath, target); err != nil {
 		if rerr := i.renameFn(backup, target); rerr != nil {
-			return "", fmt.Errorf("go4updates/selfupdate: replacing %s failed: %w; restoring %s also failed: %w; recover manually: move %s %s",
-				target, err, backup, rerr, backup, target)
+			// Displaced target, same as above: the old binary lives only
+			// under the backup name.
+			return backup, fmt.Errorf("%w: replacing %s failed; restoring %s also failed: %w; recover manually: move %s %s",
+				ErrReplaced, target, backup, rerr, backup, target)
 		}
 
 		return "", fmt.Errorf("go4updates/selfupdate: replacing %s: %w (original restored)", target, err)
