@@ -39,9 +39,10 @@ both the minimum supported and the current Go release.
 
 This is a v0.x release: until v1.0 the API may still change between minor
 versions. The core checking model (sources, checker, watcher, results) is
-considered settled; remaining evolution is expected around asset download and
-self-update, which are intentionally out of scope for v0.1 — see
-[Non-goals for v0.1](#non-goals-for-v01).
+considered settled. The `selfupdate` package covers asset download,
+verification, and installation with the guarantees described in
+[Self-update](#self-update); as a newer addition its API may still adjust as
+real-world usage arrives.
 
 ## Design
 
@@ -81,6 +82,7 @@ github.com/skobkin/go4updates
 ├── source/gitlab
 ├── watch
 ├── releasefmt
+├── selfupdate
 └── ui/fyne              # separate Go module
     ├── markdown
     └── update
@@ -313,13 +315,222 @@ for _, asset := range result.Latest.Assets {
 }
 ```
 
-The core library does not download these assets in v0.1. This is deliberate:
-different consumers may want to write an artifact to a chosen path, stream it to
-another service, verify it while streaming, or implement an application-specific
-installer.
+The core library does not download assets while checking. Download and
+verification were designed independently of release checking in the
+`selfupdate` package: [`selfupdate.Downloader`](#self-update) streams any
+asset to an arbitrary `io.Writer` over HTTPS with hard size bounds, and the
+full select/download/verify/extract/install pipeline is described in the next
+section. Consumers that only need the raw metadata can keep writing artifacts
+to chosen paths or implement application-specific installers on top of it.
 
-Download and verification APIs should be designed independently rather than
-forcing filesystem-oriented behavior into release checking.
+## Self-update
+
+The `selfupdate` package applies results produced by the checking model: it
+selects the release asset matching the current platform, downloads it over
+HTTPS with hard size bounds, verifies its SHA-256 checksum, extracts the
+executable, and atomically replaces the running binary while keeping the
+previous version for recovery. It never re-fetches release metadata and never
+applies updates on its own — the decision to apply belongs to the application.
+
+The package is opt-in by import: applications that never reference it get
+nothing in their binary, and the root module gains no new dependencies
+(everything is standard library).
+
+### One-shot check and apply
+
+```go
+source, err := github.New("example-org/example-app")
+if err != nil {
+    return err
+}
+
+checker := updates.NewChecker(updates.CheckerOptions{})
+
+result, err := checker.Check(ctx, updates.Target{
+    CurrentVersion: "1.2.2",
+    Source:         source,
+})
+if err != nil {
+    return err
+}
+
+if result.Status != updates.StatusUpdateAvailable {
+    return nil
+}
+
+updater, err := selfupdate.New(selfupdate.WithAppName("example-app"))
+if err != nil {
+    return err
+}
+
+// Optional: preview the asset the platform policy picked before downloading.
+asset, err := updater.SelectAsset(*result.Latest)
+if err != nil {
+    return err
+}
+
+fmt.Printf("installing %s from %s\n", result.Latest.Version, asset.Name)
+
+applied, err := updater.Apply(ctx, result)
+if err != nil {
+    return err
+}
+
+fmt.Printf("installed %s; previous binary kept at %s\n", applied.Version, applied.Backup)
+```
+
+### Periodic checking with a watcher
+
+The watcher reports updates; the application decides whether to apply. The
+library never applies updates from watcher events on its own:
+
+```go
+for event := range events {
+    result := event.State.Result
+
+    if result == nil || result.Status != updates.StatusUpdateAvailable {
+        continue
+    }
+
+    // Application policy decides: user confirmation, maintenance window, etc.
+    if !userConfirmed(result.Latest.Version) {
+        continue
+    }
+
+    applied, err := updater.Apply(ctx, *result)
+    if err != nil {
+        log.Printf("update failed: %v", err)
+
+        continue
+    }
+
+    log.Printf("installed %s; restart to run it, then call Cleanup after a healthy startup (backup: %s)",
+        applied.Version, applied.Backup)
+}
+```
+
+### Guarantees
+
+**Verification is mandatory.** Updates whose checksum asset is missing,
+unreachable, or wrong fail loudly; `WithInsecureSkipVerify` is the explicit
+escape hatch and defeats the package's central safety property. A checksum
+published in the same release provides *integrity* — protection against
+corrupted, truncated, or substituted downloads — but not independent publisher
+authentication: a compromised release can publish a matching pair, and HTTPS
+protects transport only. Publisher authentication requires cryptographic
+signatures: implement the `selfupdate.Verifier` interface; the package
+documentation contains a complete ed25519 example.
+
+**Transport is HTTPS-only by default**, enforced on every redirect hop.
+`WithAllowHTTP` opts in to plain HTTP for private, self-hosted deployments. It
+is independent of `WithInsecureSkipVerify`, which controls content
+verification, not transport.
+
+**Transfers are bounded while streaming.** Downloads
+(`DefaultMaxAssetBytes`, `WithMaxAssetBytes`) and decompression
+(`DefaultMaxExtractedBytes`, `WithMaxExtractedBytes`) abort early on oversized
+or lying payloads instead of filling memory or disk.
+
+**Replacement differs by platform.**
+
+- *Unix*: the previous binary is preserved under the backup name before the
+  new one takes it with a single rename, so the target path always refers to a
+  complete executable — never missing, never torn. This is an atomic
+  *pathname* replacement; durability against sudden power loss additionally
+  depends on platform fsync behavior (the staged file is always synced; the
+  containing directory is synced best-effort, strongest on Linux).
+- *Windows*: a running executable cannot be replaced in place, only moved
+  aside. A crash between the two renames leaves the target path missing and
+  recovery is manual:
+
+  ```text
+  move app.go4updates.old app.exe
+  ```
+
+  The Windows sequence is not atomic and is documented as such.
+
+Runtime behavior is tested on Linux. Windows and darwin paths are kept
+compiling in CI (including Windows-tagged tests for native runners), but this
+repository does not run native runtime tests for them. Replacing a standalone
+executable is not updating a macOS `.app` bundle (bundle structure,
+codesigning, notarization) and not a package-manager installation; both are out
+of scope.
+
+### Backup lifecycle
+
+After a successful update the previous binary remains at
+`<exe>.go4updates.old`. It is removed only by `Installer.Cleanup`, which the
+library never calls on its own. Call it from the application **after
+successful initialization or a health check** — reaching the new binary proves
+it starts, not that it works — and never before: until then the backup is the
+only rollback material. `Cleanup` is an artifact collector and interrupted-
+update recovery tool, **not a rollback mechanism**; it cannot revert a working
+install.
+
+Rules worth knowing:
+
+- A second install while an unconfirmed backup exists fails with
+  `selfupdate.ErrBackupExists`; confirm health, run `Cleanup`, retry.
+- `Cleanup` restores the backup automatically when the target is missing (the
+  Windows crash window). This needs the original target path: when the
+  application is launched from the backup executable itself,
+  `os.Executable` resolves to the backup path, so construct the installer with
+  an explicit `selfupdate.WithTargetPath(originalPath)` — otherwise recovery is
+  the manual rename shown above.
+- Removing a backup whose old process still runs fails on Windows (sharing
+  violation); the failure is collected and the removal succeeds at the next
+  startup.
+
+### Asset naming convention
+
+The default matcher expects goreleaser-style names:
+
+```text
+{app}[_{-}{version}]_{os}_{arch}[.{archive-ext}]
+```
+
+OS and architecture tokens are matched through alias tables (`macos`/`osx` for
+`darwin`, `x86_64`/`x64` for `amd64`, `i386`/`x86` for `386`, `aarch64` for
+`arm64`, `armv6`/`armv7` for `arm`, `win32`/`win64` for `windows`). Supported
+archive extensions: `.zip`, `.tar.gz`, `.tgz`, `.tar`, `.gz`, and raw binaries
+(`.exe` required on Windows). Checksum, signature, manifest, SBOM, and
+documentation files never match, and unrecognized tokens make the match fail
+conservatively.
+
+When several assets match, a raw binary is preferred over `.zip`, then
+`.tar.gz`/`.tgz`, then `.tar`, then `.gz`. Several equally ranked candidates
+are an error (`ErrAmbiguousAsset`), never an arbitrary pick — and the same
+rule applies to members inside archives (`ErrAmbiguousExecutable`). Use
+`WithAssetMatcher` for exotic naming schemes.
+
+Limitations worth knowing: Go does not report which ARM variant a binary was
+built for, so publishers shipping separate `armv6` and `armv7` assets need a
+custom matcher; unmapped platforms (`freebsd`, `riscv64`, …) never match; and
+application names containing `_` or `-` need a custom matcher too.
+
+### Making self-update opt-in at build time
+
+The library ships no build tags or ldflags variables — activation policy
+belongs to the application. Two common patterns:
+
+1. A variable set at link time, runtime-off by default:
+
+   ```go
+   var enableSelfUpdate string // -ldflags "-X main.enableSelfUpdate=true"
+
+   func main() {
+       if enableSelfUpdate == "true" {
+           startSelfUpdater()
+       }
+   }
+   ```
+
+2. A build-tagged file, so the code is absent from package-manager builds
+   entirely (recommended for distribution packaging):
+
+   ```go
+   //go:build selfupdate
+   ```
 
 ## Release-note formatting
 
@@ -375,22 +586,23 @@ Remote Markdown images are disabled by default. When explicitly enabled, the
 renderer only permits HTTP(S) image sources and applies configured size/time
 limits.
 
-## Non-goals for v0.1
+## Non-goals
 
-The first version intentionally does not include:
+The project intentionally does not include:
 
-- automatic self-update;
-- release-asset downloading;
-- checksum/signature verification;
-- installation or rollback;
 - repository-host autodetection;
 - persistent watcher cache;
 - cron-style scheduling;
 - provider-specific authentication helpers;
 - Gitea, Qt, or Charm integrations.
 
-The public model is intended to leave room for these features without coupling
-them to the initial checker implementation.
+Within self-update, the following are deliberately deferred until real
+requirements arrive: built-in signature schemes beyond the `Verifier`
+extension point (ed25519, minisign, cosign), `.xz`/`.zst`/`.7z`/`.bz2`
+archives, macOS universal binaries, ARM variant disambiguation beyond the
+alias class, delta updates, automatic restart after update, automatic updates
+from watcher events, download progress reporting and resume, checksum digests
+embedded in `updates.Asset`, and a public rollback API.
 
 ## License
 

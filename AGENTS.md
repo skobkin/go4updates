@@ -20,6 +20,10 @@ graph.
 - `source/gitlab`: GitLab release source adapter.
 - `watch`: periodic multi-target checking, state, and subscriptions.
 - `releasefmt`: framework-independent release-note/Markdown formatting helpers.
+- `selfupdate`: opt-in application of checked results — platform asset
+  selection, bounded HTTPS-only streaming download, mandatory SHA-256
+  verification, archive extraction, and crash-safe atomic binary replacement
+  with backup retention until application-confirmed cleanup.
 - `ui/fyne`: separate nested Go module, `github.com/skobkin/go4updates/ui/fyne`.
 - `ui/fyne/markdown`: reusable Fyne Markdown rendering with optional lazy remote images.
 - `ui/fyne/update`: Fyne update/release dialog built on core result types.
@@ -40,7 +44,11 @@ Future UI integrations may use sibling nested modules such as `ui/charm` or
   - UI modules render already-produced results.
 - Do not mutate upstream release Markdown in the checker or source adapters.
 - Do not add self-update, asset download, signature verification, rollback, or
-  installer behavior unless explicitly requested and designed first.
+  installer behavior unless explicitly requested and designed first. The
+  `selfupdate` package is the designed, sanctioned implementation of this
+  functionality; extensions beyond its documented scope (new signature
+  schemes, new archive formats, rollback APIs, auto-apply behaviors) still
+  require a design pass first.
 - Avoid speculative abstractions. Add extension points where confirmed
   requirements exist, but prefer small interfaces and standard-library types.
 - Use `context.Context` on network and other IO boundaries.
@@ -173,7 +181,7 @@ If lint configuration applies to the nested module, run the corresponding lint c
 
 - Use Conventional Commits.
 - Keep commits focused and describe behavioral impact.
-- Suggested scopes include `source`, `watch`, `releasefmt`, `fyne`, `docs`, and `deps`.
+- Suggested scopes include `source`, `watch`, `releasefmt`, `selfupdate`, `fyne`, `docs`, and `deps`.
 - Examples:
   - `feat(source): add GitLab release adapter`
   - `feat(watch): support per-target intervals`
