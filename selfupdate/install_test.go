@@ -649,6 +649,41 @@ func TestCleanupRemovesStagingArtifacts(t *testing.T) {
 	}
 }
 
+func TestCleanupKeepsBackupWhenRecoveryFails(t *testing.T) {
+	dir := t.TempDir()
+
+	target := filepath.Join(dir, "app")
+	backup := target + BackupSuffix
+
+	writeTarget(t, backup, "v1", 0o755)
+
+	i := newTestInstaller(t, target)
+
+	// The crash-window recovery fails (for example a locked target name on
+	// Windows): the backup is then the only remaining copy of the old
+	// binary and must survive Cleanup for the next startup.
+	i.renameFn = func(_, _ string) error {
+		return errors.New("injected rename failure")
+	}
+
+	err := i.Cleanup()
+	if err == nil {
+		t.Fatal("Cleanup should report the failed recovery")
+	}
+
+	if !strings.Contains(err.Error(), "restoring") {
+		t.Errorf("error should mention the failed restore, got: %v", err)
+	}
+
+	if got := readFileForTest(t, backup); got != "v1" {
+		t.Errorf("backup content = %q, want v1 (backup must survive a failed recovery)", got)
+	}
+
+	if _, statErr := os.Lstat(target); !errors.Is(statErr, fs.ErrNotExist) {
+		t.Error("target should still be missing after the failed recovery")
+	}
+}
+
 func TestCleanupBestEffortWithUnremovableFiles(t *testing.T) {
 	dir := t.TempDir()
 

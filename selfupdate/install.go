@@ -406,7 +406,11 @@ func (i *Installer) publishBackup(target, backup string) (created bool, err erro
 //     [WithTargetPath]; otherwise recovery is a manual rename.
 //  2. Removal of leftover download, staging, and backup-copy files from
 //     interrupted installs.
-//  3. Removal of the backup of the previous version.
+//  3. Removal of the backup of the previous version. The backup is retired
+//     only when the target was confirmed present or just restored: when
+//     recovery failed, the backup is the only remaining copy of the
+//     executable, so it is kept for the next startup instead of being
+//     destroyed by the very run that noticed the problem.
 //
 // The library never calls Cleanup on its own. Applications should call it
 // after successful initialization or a health check — reaching the new
@@ -429,12 +433,16 @@ func (i *Installer) Cleanup() error {
 	// 1. Recovery: restore the backup when the target is missing.
 	_, statErr := os.Lstat(target)
 
+	restored := false
+
 	switch {
 	case errors.Is(statErr, fs.ErrNotExist):
 		if _, berr := os.Lstat(backup); berr == nil {
 			if rerr := i.renameFn(backup, target); rerr != nil {
 				problems = append(problems, fmt.Errorf("restoring %s: %w", backup, rerr))
 			} else {
+				restored = true
+
 				_ = i.syncDirFn(dir)
 			}
 		} else if !errors.Is(berr, fs.ErrNotExist) {
@@ -461,9 +469,14 @@ func (i *Installer) Cleanup() error {
 		}
 	}
 
-	// 3. Retire the backup (gone already if it was just restored).
-	if err := i.removeFn(backup); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		problems = append(problems, fmt.Errorf("removing backup %s: %w", backup, err))
+	// 3. Retire the backup (gone already if it was just restored) — but only
+	// when the target is confirmed present or was just restored. After a
+	// failed recovery the backup is the only remaining copy of the
+	// executable and must survive for the next startup.
+	if statErr == nil || restored {
+		if err := i.removeFn(backup); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			problems = append(problems, fmt.Errorf("removing backup %s: %w", backup, err))
+		}
 	}
 
 	return errors.Join(problems...)
