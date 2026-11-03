@@ -110,6 +110,38 @@ func TestMatchAssetName(t *testing.T) {
 	}
 }
 
+// Regression: a token that is both the application name and a platform
+// alias was claimed by the platform check, so the application token was
+// never found and a conventional asset did not match. An application named
+// like an alias keeps its token; the convention places the platform token
+// after it anyway.
+func TestMatchAssetNameAppNamedLikePlatformAlias(t *testing.T) {
+	tests := []struct {
+		asset     string
+		app       string
+		goos      string
+		goarch    string
+		wantMatch bool
+	}{
+		{asset: "mac_1.2.3_darwin_amd64.zip", app: "mac", goos: "darwin", goarch: "amd64", wantMatch: true},
+		{asset: "linux_1.2.3_linux_amd64.tar.gz", app: "linux", goos: "linux", goarch: "amd64", wantMatch: true},
+		{asset: "arm_1.2.3_linux_arm.tar.gz", app: "arm", goos: "linux", goarch: "arm", wantMatch: true},
+
+		// The alias claim must not excuse a missing platform token.
+		{asset: "mac_amd64.zip", app: "mac", goos: "darwin", goarch: "amd64", wantMatch: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.asset, func(t *testing.T) {
+			got := MatchAssetName(tt.asset, tt.app, tt.goos, tt.goarch)
+			if got != tt.wantMatch {
+				t.Fatalf("MatchAssetName(%q, %q, %q, %q) = %v, want %v",
+					tt.asset, tt.app, tt.goos, tt.goarch, got, tt.wantMatch)
+			}
+		})
+	}
+}
+
 func TestVersionish(t *testing.T) {
 	tests := []struct {
 		token string

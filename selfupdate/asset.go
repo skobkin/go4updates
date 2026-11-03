@@ -193,20 +193,29 @@ func MatchAssetName(name, appName, goos, goarch string) bool {
 	for i := 0; i < len(tokens); i++ {
 		tok := tokens[i]
 
-		switch {
-		case slices.Contains(wantOS, tok):
-			foundOS = true
-			continue
-
-		case slices.Contains(wantArch, tok):
-			foundArch = true
-			continue
-
-		case tok == app:
+		// The application token is claimed first: an application named like
+		// a platform alias ("mac", "linux", "arm") keeps its token, and the
+		// convention places the platform token after it anyway. A later
+		// equal token falls through to the platform checks.
+		if !foundApp && tok == app {
 			foundApp = true
-			continue
 
-		case versionish(tok):
+			continue
+		}
+
+		if slices.Contains(wantOS, tok) {
+			foundOS = true
+
+			continue
+		}
+
+		if slices.Contains(wantArch, tok) {
+			foundArch = true
+
+			continue
+		}
+
+		if versionish(tok) {
 			// Version labels are tolerated between the application and
 			// platform tokens or after them.
 			continue
