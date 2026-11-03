@@ -58,6 +58,7 @@ type Installer struct {
 	renameFn  func(oldname, newname string) error
 	syncDirFn func(dir string) error
 	removeFn  func(name string) error
+	lstatFn   func(name string) (os.FileInfo, error)
 }
 
 // NewInstaller creates an Installer from opts. It understands
@@ -90,6 +91,7 @@ func NewInstaller(opts ...Option) (*Installer, error) {
 		renameFn:  os.Rename,
 		syncDirFn: syncDir,
 		removeFn:  os.Remove,
+		lstatFn:   os.Lstat,
 	}, nil
 }
 
@@ -423,12 +425,23 @@ func (i *Installer) publishBackup(target, backup string) (created bool, err erro
 		return false, fmt.Errorf("go4updates/selfupdate: closing the backup copy: %w", err)
 	}
 
-	// Re-check before publication so a racing backup is never replaced.
-	if _, err := os.Lstat(backup); err == nil {
+	// Re-check before publication so a racing backup is never replaced. A
+	// path that cannot be inspected disqualifies the publication just like
+	// an existing one: the rename below would replace whatever is there.
+	switch _, err := i.lstatFn(backup); {
+	case err == nil:
 		_ = i.removeFn(tmp.Name())
 
 		return false, fmt.Errorf("%w: %s appeared concurrently (cross-process updates are unsupported)",
 			ErrBackupExists, backup)
+
+	case errors.Is(err, fs.ErrNotExist):
+		// The path is free; publish.
+
+	default:
+		_ = i.removeFn(tmp.Name())
+
+		return false, fmt.Errorf("go4updates/selfupdate: inspecting %s: %w", backup, err)
 	}
 
 	if err := i.renameFn(tmp.Name(), backup); err != nil {

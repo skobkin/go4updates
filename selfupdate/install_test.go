@@ -595,6 +595,60 @@ func TestInstallCancelAfterBackupReportsFailedRemoval(t *testing.T) {
 	}
 }
 
+// Regression: the pre-publication re-check of the backup path only rejected
+// an existing backup; a path that could not be inspected at all fell through
+// to the publishing rename, which would have replaced whatever sits there —
+// the exact destruction the re-check exists to prevent. An inspection
+// failure now disqualifies the publication like an existing backup does.
+func TestPublishBackupRejectsUninspectableBackupPath(t *testing.T) {
+	dir := t.TempDir()
+
+	target := filepath.Join(dir, "app")
+	writeTarget(t, target, "v1", 0o755)
+
+	i := newTestInstaller(t, target)
+
+	// Force the copy fallback: with the link refused, the backup goes
+	// through the staged-copy path with its pre-publication re-check.
+	i.linkFn = func(oldname, newname string) error {
+		return errors.New("injected: link not supported")
+	}
+
+	i.lstatFn = func(name string) (os.FileInfo, error) {
+		if name == target+BackupSuffix {
+			return nil, errors.New("injected inspection failure")
+		}
+
+		return os.Lstat(name)
+	}
+
+	_, err := i.Install(t.Context(), stagedFile(t, dir, "v2"))
+	if err == nil {
+		t.Fatal("Install should fail when the backup path cannot be inspected before publication")
+	}
+
+	if errors.Is(err, ErrBackupExists) {
+		t.Fatalf("err = %v, want an inspection failure, not ErrBackupExists", err)
+	}
+
+	if !strings.Contains(err.Error(), "inspecting") {
+		t.Fatalf("err = %v, want it to report the inspection failure", err)
+	}
+
+	if got := readFileForTest(t, target); got != "v1" {
+		t.Errorf("target was modified: %q", got)
+	}
+
+	// The staged backup copy must not survive the failed publication.
+	// (Only the tmp sweep: the staged input file itself lives in the same
+	// directory and legitimately matches the new* prefix.)
+	for _, e := range dirEntries(t, dir) {
+		if strings.Contains(e, ".go4updates.tmp") {
+			t.Errorf("backup staging leftover %q was not removed", e)
+		}
+	}
+}
+
 func TestInstallConcurrentSerialization(t *testing.T) {
 	dir := t.TempDir()
 
