@@ -41,9 +41,12 @@
 //
 // On Windows a running executable cannot be replaced in place; the
 // replacement moves it aside first. A crash between the two renames leaves
-// the target path missing, and recovery is manual: rename
-// "<exe>.go4updates.old" back to "<exe>". See the repository README for the
-// full support matrix and recovery procedures.
+// the target path missing. When the original target path is known,
+// [Updater.Cleanup] restores the backup automatically; recovery is a manual
+// rename of "<exe>.go4updates.old" back to "<exe>" only when the
+// application is launched from the backup itself without an explicit
+// [WithTargetPath]. See the repository README for the full support matrix
+// and recovery procedures.
 //
 // The backup is removed only by [Updater.Cleanup] (or [Installer.Cleanup]
 // directly), which applications should call after successful initialization

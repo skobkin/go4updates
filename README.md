@@ -446,8 +446,10 @@ or lying payloads instead of filling memory or disk.
   depends on platform fsync behavior (the staged file is always synced; the
   containing directory is synced best-effort, strongest on Linux).
 - *Windows*: a running executable cannot be replaced in place, only moved
-  aside. A crash between the two renames leaves the target path missing and
-  recovery is manual:
+  aside. A crash between the two renames leaves the target path missing.
+  Recovery is automatic when the original target path is known — `Cleanup`
+  restores the backup (see [Backup lifecycle](#backup-lifecycle)) — and is
+  otherwise manual:
 
   ```text
   move app.go4updates.old app.exe
