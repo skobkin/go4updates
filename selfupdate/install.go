@@ -228,7 +228,13 @@ func (i *Installer) installUnix(ctx context.Context, stagedPath, target, backup 
 
 	if err := ctx.Err(); err != nil {
 		if backupCreated {
-			_ = i.removeFn(backup)
+			// The attempt backup is redundant now; its removal failure is
+			// folded into the error instead of being dropped, so a retry
+			// blocked by ErrBackupExists can be explained.
+			if rmErr := i.removeFn(backup); rmErr != nil {
+				return "", fmt.Errorf("go4updates/selfupdate: install canceled: %w (removing the attempt backup %s also failed: %v)",
+					err, backup, rmErr)
+			}
 		}
 
 		return "", fmt.Errorf("go4updates/selfupdate: install canceled: %w", err)

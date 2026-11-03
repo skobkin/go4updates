@@ -553,6 +553,48 @@ func TestInstallCanceledContext(t *testing.T) {
 	}
 }
 
+// Regression: on the cancellation path after the backup publication, the
+// removal error of the now-redundant attempt backup was discarded. A failed
+// removal left the backup in place, silently blocking every retry with
+// ErrBackupExists. The failure is folded into the cancellation error, the
+// way the rename-failure path already does.
+func TestInstallCancelAfterBackupReportsFailedRemoval(t *testing.T) {
+	dir := t.TempDir()
+
+	target := filepath.Join(dir, "app")
+	writeTarget(t, target, "v1", 0o755)
+
+	i := newTestInstaller(t, target)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	// First syncDir call: durability of the backup publication, right
+	// before the cancellation check. Cancel there.
+	i.syncDirFn = func(string) error {
+		cancel()
+
+		return nil
+	}
+
+	i.removeFn = func(string) error {
+		return errors.New("injected removal failure")
+	}
+
+	_, err := i.Install(ctx, stagedFile(t, dir, "v2"))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+
+	if !strings.Contains(err.Error(), "removing the attempt backup") {
+		t.Fatalf("err = %v, want it to report the failed backup removal", err)
+	}
+
+	if _, statErr := os.Lstat(target + BackupSuffix); statErr != nil {
+		t.Errorf("backup stat = %v, want the backup retained after the failed removal", statErr)
+	}
+}
+
 func TestInstallConcurrentSerialization(t *testing.T) {
 	dir := t.TempDir()
 
