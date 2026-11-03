@@ -515,7 +515,9 @@ rule applies to members inside archives (`ErrAmbiguousExecutable`). Use
 Limitations worth knowing: Go does not report which ARM variant a binary was
 built for, so publishers shipping separate `armv6` and `armv7` assets need a
 custom matcher; unmapped platforms (`freebsd`, `riscv64`, …) never match; and
-application names containing `_` or `-` need a custom matcher too.
+application names containing `_` or `-` cannot be matched by the default
+matcher — `New` rejects such a name at construction and points at
+`WithAssetMatcher`, which lifts the restriction.
 
 ### Making self-update opt-in at build time
 

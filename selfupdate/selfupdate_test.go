@@ -573,6 +573,36 @@ func TestUpdaterCleanupRetiresBackup(t *testing.T) {
 	}
 }
 
+// Regression: the default matcher tokenizes asset names on "_" and "-", so
+// an application name containing either separator can never match an asset
+// and every Apply would fail with ErrNoMatchingAsset listing conventional
+// assets. The misconfiguration is rejected at construction, with a pointer
+// to the escape hatch, instead of failing silently at first Apply.
+func TestNewRejectsSeparatorAppNameWithDefaultMatcher(t *testing.T) {
+	abs := filepath.Join(t.TempDir(), "app")
+
+	for _, name := range []string{"my-app", "my_app"} {
+		_, err := New(WithTargetPath(abs), WithAppName(name))
+		if err == nil {
+			t.Errorf("New(WithAppName(%q)) should fail while the default matcher is in use", name)
+
+			continue
+		}
+
+		if !strings.Contains(err.Error(), "WithAssetMatcher") {
+			t.Errorf("New(WithAppName(%q)) error %v should point at WithAssetMatcher", name, err)
+		}
+	}
+
+	// A custom matcher makes separator names legitimate: the name is also
+	// used for exact archive-member lookup, which has no separator issue.
+	custom := func(updates.Asset) bool { return true }
+
+	if _, err := New(WithTargetPath(abs), WithAppName("my-app"), WithAssetMatcher(custom)); err != nil {
+		t.Errorf("New with a custom matcher: %v", err)
+	}
+}
+
 func TestSelectAssetPreview(t *testing.T) {
 	f := newUpdateFixture(t)
 

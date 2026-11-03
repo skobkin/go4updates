@@ -124,7 +124,9 @@ func WithFileMode(mode fs.FileMode) Option {
 // WithAppName sets the application name used for asset matching and for
 // locating the executable inside archives. When the option is not used, the
 // target file name without its ".exe" suffix is used; an empty name is
-// rejected.
+// rejected. When the default asset matcher is in use, the name must not
+// contain "_" or "-" (the layout's token separators): [New] rejects such a
+// name with a pointer to [WithAssetMatcher], which lifts the restriction.
 func WithAppName(name string) Option {
 	return func(o *options) error {
 		if name == "" {
