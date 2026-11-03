@@ -337,7 +337,11 @@ func (i *Installer) prepareStaged(stagedPath, target string) error {
 		return fmt.Errorf("go4updates/selfupdate: setting mode on %s: %w", stagedPath, err)
 	}
 
-	f, err := os.Open(stagedPath)
+	// The handle must be writable: on Windows, FlushFileBuffers (what
+	// File.Sync calls) requires GENERIC_WRITE access, so syncing a file
+	// opened read-only fails with "Access is denied" and would make every
+	// install fail there before any rename.
+	f, err := os.OpenFile(stagedPath, os.O_WRONLY, 0)
 	if err != nil {
 		return fmt.Errorf("go4updates/selfupdate: opening %s: %w", stagedPath, err)
 	}
