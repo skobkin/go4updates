@@ -16,11 +16,18 @@ type options struct {
 	httpClient *http.Client
 	allowHTTP  bool
 
-	maxAssetBytes int64
+	maxAssetBytes     int64
+	maxExtractedBytes int64
 
 	targetPath  string
 	fileMode    fs.FileMode
 	fileModeSet bool
+
+	appName            string
+	assetMatcher       AssetMatcher
+	verifier           Verifier
+	insecureSkipVerify bool
+	force              bool
 }
 
 // Option configures the selfupdate components. Each constructor applies the
@@ -109,6 +116,95 @@ func WithFileMode(mode fs.FileMode) Option {
 
 		o.fileMode = mode
 		o.fileModeSet = true
+
+		return nil
+	}
+}
+
+// WithAppName sets the application name used for asset matching and for
+// locating the executable inside archives. Zero selects the target file
+// name without its ".exe" suffix.
+func WithAppName(name string) Option {
+	return func(o *options) error {
+		if name == "" {
+			return errors.New("application name must not be empty")
+		}
+
+		o.appName = name
+
+		return nil
+	}
+}
+
+// WithAssetMatcher overrides the default platform asset matching entirely.
+// See [AssetMatcher] and [MatchAssetName] for the convention the default
+// matcher implements and its conservative limitations.
+func WithAssetMatcher(matcher AssetMatcher) Option {
+	return func(o *options) error {
+		if matcher == nil {
+			return errors.New("asset matcher must not be nil")
+		}
+
+		o.assetMatcher = matcher
+
+		return nil
+	}
+}
+
+// WithVerifier replaces the default SHA-256 checksum verification with a
+// custom implementation, for example an ed25519 signature check. See
+// [Verifier] for the contract.
+func WithVerifier(verifier Verifier) Option {
+	return func(o *options) error {
+		if verifier == nil {
+			return errors.New("verifier must not be nil")
+		}
+
+		o.verifier = verifier
+
+		return nil
+	}
+}
+
+// WithInsecureSkipVerify disables verification of downloaded updates
+// entirely: binaries whose checksums are missing, unreachable, or wrong are
+// installed anyway.
+//
+// This defeats the package's central safety property and must only be used
+// when the download channel is fully trusted by other means (private
+// infrastructure, tests). It is independent of [WithAllowHTTP], which
+// controls transport security, not content verification.
+func WithInsecureSkipVerify() Option {
+	return func(o *options) error {
+		o.insecureSkipVerify = true
+
+		return nil
+	}
+}
+
+// WithMaxExtractedBytes sets the hard size limit enforced while streaming
+// decompressed archive data, so a decompression bomb is aborted early
+// instead of filling the disk. Zero selects [DefaultMaxExtractedBytes];
+// non-positive values are rejected.
+func WithMaxExtractedBytes(n int64) Option {
+	return func(o *options) error {
+		if n <= 0 {
+			return fmt.Errorf("max extracted bytes must be positive, got %d", n)
+		}
+
+		o.maxExtractedBytes = n
+
+		return nil
+	}
+}
+
+// WithForce lets Apply run regardless of the result status, for example to
+// reinstall the same version or to apply a release whose comparison was
+// inconclusive. It bypasses only the status guard: verification, download
+// bounds, and the backup rules always apply.
+func WithForce() Option {
+	return func(o *options) error {
+		o.force = true
 
 		return nil
 	}
