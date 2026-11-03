@@ -1,8 +1,11 @@
 package selfupdate
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
+	"path/filepath"
 )
 
 // options carries the configuration shared by the selfupdate components.
@@ -14,6 +17,10 @@ type options struct {
 	allowHTTP  bool
 
 	maxAssetBytes int64
+
+	targetPath  string
+	fileMode    fs.FileMode
+	fileModeSet bool
 }
 
 // Option configures the selfupdate components. Each constructor applies the
@@ -61,6 +68,47 @@ func WithMaxAssetBytes(n int64) Option {
 		}
 
 		o.maxAssetBytes = n
+
+		return nil
+	}
+}
+
+// WithTargetPath installs to path instead of the running executable. The
+// path must be absolute. Symbolic links in the path are resolved when the
+// path exists, so the backup is created next to the real binary.
+//
+// An explicit target path is required when the process may be launched from
+// the backup executable (for example manually, after a failed update):
+// os.Executable then resolves to the backup path, and automatic recovery
+// would look in the wrong place.
+func WithTargetPath(path string) Option {
+	return func(o *options) error {
+		if path == "" {
+			return errors.New("target path must not be empty")
+		}
+
+		if !filepath.IsAbs(path) {
+			return fmt.Errorf("target path must be absolute, got %q", path)
+		}
+
+		o.targetPath = path
+
+		return nil
+	}
+}
+
+// WithFileMode sets the permission bits applied to the installed
+// executable. Without it, a replaced target keeps the mode of the binary it
+// replaces, and a newly created target is installed with 0755. Only
+// permission bits are accepted.
+func WithFileMode(mode fs.FileMode) Option {
+	return func(o *options) error {
+		if mode&^fs.ModePerm != 0 {
+			return fmt.Errorf("file mode must be permission bits, got %v", mode)
+		}
+
+		o.fileMode = mode
+		o.fileModeSet = true
 
 		return nil
 	}

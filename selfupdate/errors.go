@@ -61,4 +61,11 @@ var (
 	// never overwritten: confirm the installed version is healthy and call
 	// [Installer.Cleanup] to retire it, then retry.
 	ErrBackupExists = errors.New("go4updates/selfupdate: backup of the previous executable already exists")
+
+	// ErrReplaced reports that the executable replacement itself succeeded
+	// before the error being reported, which concerns post-replacement work
+	// only (for example a directory sync failure). When errors.Is finds it,
+	// the installed binary is the new one; otherwise a failed install left
+	// the target untouched.
+	ErrReplaced = errors.New("go4updates/selfupdate: executable was replaced before the failure")
 )
