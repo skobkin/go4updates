@@ -493,6 +493,98 @@ func TestInstallCopyFallbackFailureFailsInstall(t *testing.T) {
 	}
 }
 
+// The copy fallback must publish the backup without clobbering: the staging
+// file is linked onto the backup name — an operation that fails with EEXIST
+// instead of replacing whatever appeared there — and the rename, which
+// would silently replace, is reserved for filesystems without hardlinks.
+func TestInstallCopyFallbackPublishesWithoutClobbering(t *testing.T) {
+	dir := t.TempDir()
+
+	target := filepath.Join(dir, "app")
+	writeTarget(t, target, "v1", 0o755)
+
+	i := newTestInstaller(t, target)
+
+	i.linkFn = func(oldname, newname string) error {
+		if oldname == target {
+			// Hardlinks to the target are refused; links to the staging
+			// file the fallback creates are the no-clobber publication.
+			return errors.New("eperm: link refused for the target")
+		}
+
+		return os.Link(oldname, newname)
+	}
+
+	var renamed []string
+
+	i.renameFn = func(oldname, newname string) error {
+		renamed = append(renamed, oldname)
+
+		return os.Rename(oldname, newname)
+	}
+
+	backup, err := i.Install(t.Context(), stagedFile(t, dir, "v2"))
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	if got := readFileForTest(t, backup); got != "v1" {
+		t.Errorf("backup content = %q, want v1", got)
+	}
+
+	for _, oldname := range renamed {
+		if strings.Contains(oldname, ".go4updates.tmp") {
+			t.Errorf("backup was published with a clobbering rename of %q", oldname)
+		}
+	}
+
+	for _, e := range dirEntries(t, dir) {
+		if strings.Contains(e, ".go4updates.tmp") {
+			t.Errorf("backup staging leftover %q was not removed", e)
+		}
+	}
+}
+
+// A backup appearing between the existence check and the publication must
+// fail the install with ErrBackupExists, never be replaced: the EEXIST the
+// no-clobber link reports is the cross-process race surfacing safely.
+func TestInstallCopyFallbackLinkRaceKeepsBackup(t *testing.T) {
+	dir := t.TempDir()
+
+	target := filepath.Join(dir, "app")
+	writeTarget(t, target, "v1", 0o755)
+
+	i := newTestInstaller(t, target)
+
+	i.linkFn = func(oldname, _ string) error {
+		if oldname == target {
+			return errors.New("enosys: hardlinks unsupported")
+		}
+
+		// Another process published a backup while this one was copying.
+		return fs.ErrExist
+	}
+
+	_, err := i.Install(t.Context(), stagedFile(t, dir, "v2"))
+	if !errors.Is(err, ErrBackupExists) {
+		t.Fatalf("err = %v, want ErrBackupExists for the publication race", err)
+	}
+
+	if _, statErr := os.Lstat(target + BackupSuffix); statErr == nil {
+		t.Error("a backup must not exist after the losing side of the race gave up")
+	}
+
+	if got := readFileForTest(t, target); got != "v1" {
+		t.Errorf("target was modified: %q", got)
+	}
+
+	for _, e := range dirEntries(t, dir) {
+		if strings.Contains(e, ".go4updates.tmp") {
+			t.Errorf("backup staging leftover %q was not removed", e)
+		}
+	}
+}
+
 func TestInstallRenameFailureRemovesOwnBackup(t *testing.T) {
 	dir := t.TempDir()
 

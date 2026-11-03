@@ -42,8 +42,9 @@ const BackupSuffix = ".go4updates.old"
 // sequence is not atomic and this is a documented limitation.
 //
 // Installs through one Installer are serialized. Cross-process updates of
-// one target are unsupported; the backup-existence checks fail fast in the
-// common races.
+// one target are unsupported: the backup-existence checks fail fast in the
+// common races, and backup publication is no-clobber where the filesystem
+// provides atomic hardlinks, but this is not a locking system.
 type Installer struct {
 	targetPath  string
 	fileMode    fs.FileMode
@@ -389,11 +390,16 @@ func (i *Installer) prepareStaged(stagedPath, target string) error {
 }
 
 // publishBackup preserves the current target under backup: a hardlink where
-// the filesystem supports it, otherwise a staged copy published atomically.
-// The backup path was verified free just before the call; EEXIST at link
+// the filesystem supports it, otherwise a staged copy published without
+// clobbering — the staging file is linked onto the backup name, which fails
+// with EEXIST instead of replacing whatever appeared there, and only a
+// filesystem without hardlink support falls back to a single rename. The
+// backup path was verified free just before publication; EEXIST at link
 // time is the concurrent-install race and surfaces as [ErrBackupExists] —
-// it never triggers the copy fallback, and an existing backup is never
-// overwritten or truncated.
+// it never triggers a fallback, and an existing backup is never overwritten
+// or truncated while this process installs. The rename fallback retains the
+// documented cross-process window: cross-process updates of one target are
+// unsupported.
 func (i *Installer) publishBackup(target, backup string) (created bool, err error) {
 	linkErr := i.linkFn(target, backup)
 	if linkErr == nil {
@@ -406,9 +412,9 @@ func (i *Installer) publishBackup(target, backup string) (created bool, err erro
 	}
 
 	// Hardlinks are unsupported on this filesystem (or otherwise refused):
-	// stage a copy under a temporary name, sync it, and publish it with a
-	// single rename so a partial copy is never visible under the backup
-	// name.
+	// stage a copy under a temporary name, sync it, and publish it through
+	// a no-clobber step so a partial copy is never visible under the backup
+	// name and a racing backup is never replaced.
 	dir := filepath.Dir(target)
 	base := filepath.Base(target)
 
@@ -439,9 +445,9 @@ func (i *Installer) publishBackup(target, backup string) (created bool, err erro
 		return false, fmt.Errorf("go4updates/selfupdate: closing the backup copy: %w", err)
 	}
 
-	// Re-check before publication so a racing backup is never replaced. A
-	// path that cannot be inspected disqualifies the publication just like
-	// an existing one: the rename below would replace whatever is there.
+	// Re-check before publication so a racing backup fails fast. A path
+	// that cannot be inspected disqualifies the publication just like an
+	// existing one.
 	switch _, err := i.lstatFn(backup); {
 	case err == nil:
 		_ = i.removeFn(tmp.Name())
@@ -458,6 +464,30 @@ func (i *Installer) publishBackup(target, backup string) (created bool, err erro
 		return false, fmt.Errorf("go4updates/selfupdate: inspecting %s: %w", backup, err)
 	}
 
+	// Publishing through a link is atomic and no-clobber: if another
+	// process created the backup between the check above and now, the link
+	// fails with EEXIST instead of replacing it. tmp sits in the same
+	// directory as the backup, so the link cannot cross a filesystem
+	// boundary.
+	publishErr := i.linkFn(tmp.Name(), backup)
+
+	switch {
+	case publishErr == nil:
+		_ = i.removeFn(tmp.Name())
+
+		return true, nil
+
+	case errors.Is(publishErr, fs.ErrExist):
+		_ = i.removeFn(tmp.Name())
+
+		return false, fmt.Errorf("%w: %s appeared concurrently (cross-process updates are unsupported)",
+			ErrBackupExists, backup)
+	}
+
+	// No hardlink support here either (the condition that forced the copy):
+	// publish with a rename. os.Rename replaces an existing destination, so
+	// the re-check above is the only guard and the residual cross-process
+	// window is a documented limitation.
 	if err := i.renameFn(tmp.Name(), backup); err != nil {
 		_ = i.removeFn(tmp.Name())
 

@@ -499,6 +499,10 @@ Rules worth knowing:
 
 - A second install while an unconfirmed backup exists fails with
   `selfupdate.ErrBackupExists`; confirm health, run `Cleanup`, retry.
+- Installs through one installer are serialized, and backup publication is
+  no-clobber where the filesystem provides atomic hardlinks — but
+  cross-process updates of one target are unsupported; the checks are not
+  a locking system.
 - `Cleanup` restores the backup automatically when the target is missing (the
   Windows crash window). This needs the original target path: when the
   application is launched from the backup executable itself,

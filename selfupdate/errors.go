@@ -57,9 +57,13 @@ var (
 	ErrUnsupportedArchive = errors.New("go4updates/selfupdate: archive format is not supported")
 
 	// ErrBackupExists reports that a backup of the previous executable
-	// already exists at the target. The backup of an unconfirmed update is
-	// never overwritten: confirm the installed version is healthy and call
-	// [Installer.Cleanup] to retire it, then retry.
+	// already exists at the target. While this process installs, an
+	// existing backup is never overwritten, written, or removed: confirm
+	// the installed version is healthy and call [Installer.Cleanup] to
+	// retire it, then retry. Cross-process updates of one target are
+	// unsupported — the existence checks fail fast in the common races and
+	// backup publication is no-clobber where the filesystem provides
+	// atomic hardlinks, but this is not a locking system.
 	ErrBackupExists = errors.New("go4updates/selfupdate: backup of the previous executable already exists")
 
 	// ErrReplaced reports that the attempt changed the target name before
