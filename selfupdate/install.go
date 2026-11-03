@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 )
 
 // BackupSuffix is appended to the target binary name to form the name of
@@ -33,6 +34,11 @@ const BackupSuffix = ".go4updates.old"
 // is an atomic pathname replacement; durability after sudden power loss
 // additionally depends on platform fsync behavior (the staged file is always
 // synced; the containing directory is synced, which is strongest on Linux).
+// Platforms or filesystems that cannot sync a directory at all are
+// tolerated as the documented best effort — a failed sync that cannot
+// physically succeed does not report a completed replacement as a failure —
+// while genuine sync I/O errors surface (wrapped in [ErrReplaced] when they
+// arrive after the replacement).
 //
 // On Windows a running executable cannot be deleted or written, only moved
 // aside, so the replacement moves the old binary to the backup name first
@@ -210,7 +216,7 @@ func (i *Installer) installUnix(ctx context.Context, stagedPath, target, backup 
 			return "", fmt.Errorf("go4updates/selfupdate: installing %s: %w", target, err)
 		}
 
-		if err := i.syncDirFn(filepath.Dir(target)); err != nil {
+		if err := i.syncDirFn(filepath.Dir(target)); err != nil && !dirSyncUnsupported(err) {
 			return "", fmt.Errorf("%w: syncing %s after the installation: %w",
 				ErrReplaced, filepath.Dir(target), err)
 		}
@@ -257,7 +263,7 @@ func (i *Installer) installUnix(ctx context.Context, stagedPath, target, backup 
 		return "", fmt.Errorf("go4updates/selfupdate: replacing %s: %w", target, err)
 	}
 
-	if err := i.syncDirFn(filepath.Dir(target)); err != nil {
+	if err := i.syncDirFn(filepath.Dir(target)); err != nil && !dirSyncUnsupported(err) {
 		// The replacement is in effect; the error must not suggest
 		// otherwise.
 		return backup, fmt.Errorf("%w: syncing %s after the replacement: %w",
@@ -329,7 +335,7 @@ func (i *Installer) installWindows(ctx context.Context, stagedPath, target, back
 		return "", fmt.Errorf("go4updates/selfupdate: replacing %s: %w (original restored)", target, err)
 	}
 
-	if err := i.syncDirFn(filepath.Dir(target)); err != nil {
+	if err := i.syncDirFn(filepath.Dir(target)); err != nil && !dirSyncUnsupported(err) {
 		return backup, fmt.Errorf("%w: syncing %s after the replacement: %w",
 			ErrReplaced, filepath.Dir(target), err)
 	}
@@ -631,6 +637,23 @@ func isStagingArtifact(name, base string) bool {
 	return strings.HasPrefix(suffix, "download") ||
 		strings.HasPrefix(suffix, "new") ||
 		strings.HasPrefix(suffix, "tmp")
+}
+
+// dirSyncUnsupported reports whether err means the platform or filesystem
+// cannot sync a directory at all — EINVAL, ENOTSUP/EOPNOTSUPP, and
+// equivalents — as opposed to a genuine I/O failure such as EIO. An
+// unsupported sync is tolerated as the documented best effort, so a
+// completed replacement is not reported as a failure on filesystems that
+// simply do not provide the operation; real disk errors are never silently
+// swallowed.
+func dirSyncUnsupported(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	return errors.Is(err, syscall.EINVAL) ||
+		errors.Is(err, syscall.ENOTSUP) ||
+		errors.Is(err, syscall.EOPNOTSUPP)
 }
 
 // syncDir syncs a directory entry list to disk. Not portable to Windows,

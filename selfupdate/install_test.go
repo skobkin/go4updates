@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 )
 
@@ -683,6 +684,74 @@ func TestInstallPostReplacementSyncFailureReportsReplaced(t *testing.T) {
 	if _, statErr := os.Lstat(backup); statErr != nil {
 		t.Error("backup should survive a post-replacement failure")
 	}
+}
+
+// Filesystems and platforms that cannot sync a directory at all report
+// EINVAL/ENOTSUP-class errors; the documented best effort must tolerate
+// them instead of failing a completed install. Genuine I/O failures are
+// still reported, wrapped in ErrReplaced so the caller knows the
+// replacement took effect despite the error.
+func TestInstallToleratesUnsupportedDirSync(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("syncDir is a no-op on Windows; the errno classification is a Unix path")
+	}
+
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{name: "EINVAL", err: syscall.EINVAL},
+		{name: "ENOTSUP", err: syscall.ENOTSUP},
+		{name: "wrapped EOPNOTSUPP", err: fmt.Errorf("sync directory: %w", syscall.EOPNOTSUPP)},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+
+			target := filepath.Join(dir, "app")
+			writeTarget(t, target, "v1", 0o755)
+
+			i := newTestInstaller(t, target)
+			i.syncDirFn = func(string) error { return tt.err }
+
+			backup, err := i.Install(t.Context(), stagedFile(t, dir, "v2"))
+			if err != nil {
+				t.Fatalf("Install must tolerate an unsupported directory sync, got: %v", err)
+			}
+
+			if backup == "" {
+				t.Error("backup path is empty after a successful install")
+			}
+
+			if got := readFileForTest(t, target); got != "v2" {
+				t.Errorf("target content = %q, want v2", got)
+			}
+		})
+	}
+
+	t.Run("genuine sync failure still reports ErrReplaced", func(t *testing.T) {
+		dir := t.TempDir()
+
+		target := filepath.Join(dir, "app")
+		writeTarget(t, target, "v1", 0o755)
+
+		i := newTestInstaller(t, target)
+		i.syncDirFn = func(string) error { return errors.New("input/output error") }
+
+		backup, err := i.Install(t.Context(), stagedFile(t, dir, "v2"))
+		if !errors.Is(err, ErrReplaced) {
+			t.Fatalf("err = %v, want ErrReplaced for a real directory-sync failure", err)
+		}
+
+		if backup == "" {
+			t.Error("the replacement took effect; the backup path must be reported")
+		}
+
+		if got := readFileForTest(t, target); got != "v2" {
+			t.Errorf("target content = %q, want v2: the replacement already happened", got)
+		}
+	})
 }
 
 func TestInstallCanceledContext(t *testing.T) {

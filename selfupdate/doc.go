@@ -37,7 +37,10 @@
 // target name always refers to a complete binary. Durability against sudden
 // power loss additionally depends on platform fsync behavior: the staged
 // file is always synced, and the containing directory is synced best-effort,
-// which is strongest on Linux.
+// which is strongest on Linux. Filesystems that cannot sync a directory are
+// tolerated (the replacement still reports success); genuine sync I/O
+// failures are reported, wrapped in [ErrReplaced] when they arrive after the
+// replacement.
 //
 // On Windows a running executable cannot be replaced in place; the
 // replacement moves it aside first. A crash between the two renames leaves

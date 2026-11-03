@@ -464,7 +464,10 @@ zip archives in the selected member only.
   complete executable — never missing, never torn. This is an atomic
   *pathname* replacement; durability against sudden power loss additionally
   depends on platform fsync behavior (the staged file is always synced; the
-  containing directory is synced best-effort, strongest on Linux).
+  containing directory is synced best-effort, strongest on Linux — and
+  filesystems that cannot sync a directory at all are tolerated, while
+  genuine sync I/O errors are reported without claiming the old binary is
+  still installed).
 - *Windows*: a running executable cannot be replaced in place, only moved
   aside. A crash between the two renames leaves the target path missing.
   Recovery is automatic when the original target path is known — `Cleanup`
