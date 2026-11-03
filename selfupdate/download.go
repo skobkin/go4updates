@@ -17,11 +17,12 @@ import (
 const DefaultMaxAssetBytes int64 = 256 << 20 // 256 MiB
 
 // StatusError describes a non-2xx HTTP response from an asset or checksum
-// download. The URL is redacted: any password it carried never appears in
-// the error.
+// download. The URL is redacted: any password it carried in userinfo never
+// appears in the error, and the query string is dropped entirely — signed
+// asset URLs commonly carry their auth tokens there.
 type StatusError struct {
 	// URL is the request URL that produced the response, with any password
-	// it carried redacted.
+	// redacted and the query string and fragment removed.
 	URL string
 
 	// StatusCode is the HTTP status code.
@@ -116,15 +117,18 @@ func (d *Downloader) Download(ctx context.Context, asset updates.Asset, w io.Wri
 
 	resp, err := d.guardedClient().Do(req)
 	if err != nil {
-		return fmt.Errorf("go4updates/selfupdate: requesting asset %q: %w", asset.Name, err)
+		// The http.Client renders the full request URL — signed query
+		// tokens included — into url.Error messages; the query never
+		// reaches the caller. The wrapped error chain is preserved.
+		return fmt.Errorf("go4updates/selfupdate: requesting asset %q: %w", asset.Name, fetch.SanitizeURLError(err))
 	}
 
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		// The URL is redacted: errors surface in logs and the asset URL
-		// may carry basic-auth userinfo.
-		return statusErrorFrom(req.URL.Redacted(), resp)
+		// The URL is redacted: errors surface in logs, and the asset URL
+		// may carry basic-auth userinfo or signed query tokens.
+		return statusErrorFrom(fetch.RedactURL(req.URL), resp)
 	}
 
 	if resp.ContentLength > d.maxBytes {
@@ -185,7 +189,7 @@ func checkURLScheme(rawURL string, allowHTTP bool) error {
 		return nil
 
 	default:
-		return fmt.Errorf("%w: %s", ErrInsecureURL, u.Redacted())
+		return fmt.Errorf("%w: %s", ErrInsecureURL, fetch.RedactURL(u))
 	}
 }
 
@@ -205,7 +209,7 @@ func (t *schemeGuardTransport) RoundTrip(req *http.Request) (*http.Response, err
 		allowed := scheme == "https" || (t.allowHTTP && scheme == "http")
 
 		if !allowed {
-			return nil, fmt.Errorf("%w: %s", ErrInsecureURL, req.URL.Redacted())
+			return nil, fmt.Errorf("%w: %s", ErrInsecureURL, fetch.RedactURL(req.URL))
 		}
 	}
 

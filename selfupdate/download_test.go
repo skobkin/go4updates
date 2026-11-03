@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -163,6 +164,126 @@ func TestDownloadStatusError(t *testing.T) {
 	if !strings.HasPrefix(statusErr.URL, "https://") {
 		t.Errorf("URL = %q, want the redacted request URL", statusErr.URL)
 	}
+}
+
+// Signed asset URLs carry their auth tokens in query parameters, and
+// url.Redacted masks userinfo passwords only. Errors surfaced by the
+// downloader — status errors, transport failures, redirect failures — must
+// never carry the query string, while still wrapping the underlying error
+// (including context cancellation) for errors.Is and errors.As.
+func TestDownloadErrorsRedactQueryTokens(t *testing.T) {
+	const token = "SUPERSECRET-SIGNED-TOKEN-42"
+
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	t.Cleanup(srv.Close)
+
+	newDownloader := func(t *testing.T, transport http.RoundTripper) *Downloader {
+		t.Helper()
+
+		client := srv.Client()
+		if transport != nil {
+			client = &http.Client{Transport: transport}
+		}
+
+		d, err := NewDownloader(WithHTTPClient(client))
+		if err != nil {
+			t.Fatalf("NewDownloader: %v", err)
+		}
+
+		return d
+	}
+
+	assertSecretAbsent := func(t *testing.T, err error) {
+		t.Helper()
+
+		if err == nil {
+			t.Fatal("expected an error")
+
+			return
+		}
+
+		if strings.Contains(err.Error(), token) {
+			t.Fatalf("error %q leaks the signed query token", err.Error())
+		}
+	}
+
+	t.Run("non-2xx status error", func(t *testing.T) {
+		d := newDownloader(t, nil)
+
+		var buf bytes.Buffer
+
+		err := d.Download(t.Context(), updates.Asset{Name: "app", URL: srv.URL + "/asset?token=" + token}, &buf)
+		assertSecretAbsent(t, err)
+
+		var statusErr *StatusError
+		if !errors.As(err, &statusErr) {
+			t.Fatalf("err = %v (%T), want *StatusError", err, err)
+		}
+
+		if !strings.HasSuffix(statusErr.URL, "/asset") {
+			t.Errorf("StatusError.URL = %q, want the path kept for diagnosis", statusErr.URL)
+		}
+	})
+
+	t.Run("transport failure", func(t *testing.T) {
+		d := newDownloader(t, failingTransport{errors.New("connection reset by peer")})
+
+		var buf bytes.Buffer
+
+		err := d.Download(t.Context(), updates.Asset{Name: "app", URL: srv.URL + "/asset?token=" + token}, &buf)
+		assertSecretAbsent(t, err)
+
+		var ue *url.Error
+		if !errors.As(err, &ue) {
+			t.Fatalf("err = %v (%T), want a *url.Error for the transport failure", err, err)
+		}
+
+		if strings.Contains(ue.URL, token) {
+			t.Errorf("sanitized url.Error still carries the token: %q", ue.URL)
+		}
+	})
+
+	t.Run("redirect failure", func(t *testing.T) {
+		redirector := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			// Nothing listens on port 1; the redirected hop fails after the
+			// token-bearing target URL has been built by the client.
+			http.Redirect(w, nil, "https://127.0.0.1:1/next?token="+token, http.StatusFound)
+		}))
+		t.Cleanup(redirector.Close)
+
+		d := newDownloader(t, nil)
+
+		var buf bytes.Buffer
+
+		err := d.Download(t.Context(), updates.Asset{Name: "app", URL: redirector.URL + "/asset?token=" + token}, &buf)
+		assertSecretAbsent(t, err)
+	})
+
+	t.Run("cancellation still wraps the context error", func(t *testing.T) {
+		d := newDownloader(t, nil)
+
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+
+		var buf bytes.Buffer
+
+		err := d.Download(ctx, updates.Asset{Name: "app", URL: srv.URL + "/asset?token=" + token}, &buf)
+		assertSecretAbsent(t, err)
+
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v, want it to wrap context.Canceled", err)
+		}
+	})
+}
+
+// failingTransport is a RoundTripper whose every request fails, standing in
+// for network-level errors the http.Client wraps in a *url.Error.
+type failingTransport struct{ err error }
+
+func (f failingTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, f.err
 }
 
 func TestDownloadSizeBound(t *testing.T) {

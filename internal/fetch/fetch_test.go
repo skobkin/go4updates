@@ -129,6 +129,76 @@ func TestDoJSONRedactsURLCredentials(t *testing.T) {
 	}
 }
 
+// Signed provider URLs carry auth tokens in query parameters; url.Redacted
+// masks only userinfo passwords, so the query string must be dropped from
+// status errors and transport failures alike.
+func TestDoJSONRedactsQueryTokens(t *testing.T) {
+	const token = "SUPERSECRET-SIGNED-TOKEN-42"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	t.Run("non-2xx status error", func(t *testing.T) {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+"/repos?token="+token, nil)
+		if err != nil {
+			t.Fatalf("building request: %v", err)
+		}
+
+		var dst []int
+
+		err = DoJSON(t.Context(), srv.Client(), req, &dst)
+
+		statusErr, ok := err.(*StatusError)
+		if !ok {
+			t.Fatalf("error = %v, want *StatusError", err)
+		}
+
+		if strings.Contains(statusErr.Error(), token) {
+			t.Errorf("error %q leaks the signed query token", statusErr.Error())
+		}
+
+		if !strings.HasSuffix(statusErr.URL, "/repos") {
+			t.Errorf("StatusError.URL = %q, want the path kept for diagnosis", statusErr.URL)
+		}
+	})
+
+	t.Run("transport failure", func(t *testing.T) {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+"/repos?token="+token, nil)
+		if err != nil {
+			t.Fatalf("building request: %v", err)
+		}
+
+		client := &http.Client{Transport: queryFailingTransport{}}
+
+		var dst []int
+
+		err = DoJSON(t.Context(), client, req, &dst)
+		if err == nil {
+			t.Fatal("expected an error")
+
+			return
+		}
+
+		if strings.Contains(err.Error(), token) {
+			t.Errorf("error %q leaks the signed query token", err.Error())
+		}
+
+		if !errors.Is(err, errTransportDown) {
+			t.Errorf("err = %v, want it to wrap the transport error", err)
+		}
+	})
+}
+
+var errTransportDown = errors.New("transport down")
+
+type queryFailingTransport struct{}
+
+func (queryFailingTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errTransportDown
+}
+
 func TestDoJSONMalformedJSON(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprint(w, `this is not json`)
