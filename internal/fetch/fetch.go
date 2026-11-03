@@ -83,7 +83,7 @@ func DoJSON(ctx context.Context, client *http.Client, req *http.Request, dst any
 		// Errors carry a redacted URL: callers may point an adapter at a
 		// server URL with basic-auth userinfo, and the error surfaces in
 		// logs, so the password must never appear in it.
-		return newStatusError(req.URL.Redacted(), resp)
+		return NewStatusError(req.URL.Redacted(), resp)
 	}
 
 	data, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBytes+1))
@@ -102,9 +102,11 @@ func DoJSON(ctx context.Context, client *http.Client, req *http.Request, dst any
 	return nil
 }
 
-// newStatusError builds a StatusError from a non-2xx response, consuming a
-// bounded body snippet for context.
-func newStatusError(url string, resp *http.Response) error {
+// NewStatusError builds a StatusError from a non-2xx response, consuming a
+// bounded body snippet for context. The URL is expected to be already
+// redacted by the caller. It is exported for use by other packages within
+// the module, so status errors keep identical shape everywhere.
+func NewStatusError(url string, resp *http.Response) *StatusError {
 	snippet, err := io.ReadAll(io.LimitReader(resp.Body, maxErrorSnippet))
 	if err != nil {
 		snippet = nil
