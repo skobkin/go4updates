@@ -164,7 +164,7 @@ func (u *Updater) SelectAsset(release updates.Release) (updates.Asset, error) {
 // the returned Applied describes it, the error concerning post-replacement
 // work only. Staging files are removed on every failure path; on success
 // the previous binary remains under Applied.Backup until the application
-// calls [Installer.Cleanup] — after initialization or a health check, never
+// calls [Updater.Cleanup] — after initialization or a health check, never
 // before.
 func (u *Updater) Apply(ctx context.Context, result updates.Result) (Applied, error) {
 	if result.Latest == nil {
@@ -275,4 +275,18 @@ func (u *Updater) Apply(ctx context.Context, result updates.Result) (Applied, er
 		Path:    target,
 		Backup:  backup,
 	}, nil
+}
+
+// Cleanup removes the artifacts of a completed Apply — most importantly the
+// backup of the previous version — and recovers an interrupted install where
+// possible. It is shorthand for [Installer.Cleanup] on the Updater's
+// installer.
+//
+// The library never calls Cleanup on its own. Call it after successful
+// initialization or an application-defined health check — reaching the new
+// binary proves it starts, not that it is healthy — and never before: until
+// then the backup is the only rollback material. Cleanup is an artifact
+// collector and interrupted-update recovery tool, not a rollback mechanism.
+func (u *Updater) Cleanup() error {
+	return u.installer.Cleanup()
 }

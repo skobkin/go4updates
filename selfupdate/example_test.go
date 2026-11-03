@@ -61,8 +61,13 @@ func ExampleUpdater_Apply() {
 		log.Fatal(err)
 	}
 
-	log.Printf("installed %s; previous binary kept at %s (removed by Cleanup after a healthy startup)",
-		applied.Version, applied.Backup)
+	log.Printf("installed %s; previous binary kept at %s", applied.Version, applied.Backup)
+
+	// After restarting into the new version and confirming it is healthy
+	// (initialization or a health check), retire the backup:
+	if err := updater.Cleanup(); err != nil {
+		log.Printf("cleanup: %v", err)
+	}
 }
 
 // Example_updaterWithWatcher applies updates for a periodically checked
@@ -123,7 +128,7 @@ func Example_updaterWithWatcher() {
 			continue
 		}
 
-		log.Printf("installed %s; restart to run it, then call Cleanup after a healthy startup (backup: %s)",
+		log.Printf("installed %s; restart to run it, then call updater.Cleanup after a healthy startup (backup: %s)",
 			applied.Version, applied.Backup)
 	}
 }

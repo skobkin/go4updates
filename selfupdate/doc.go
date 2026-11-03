@@ -45,8 +45,8 @@
 // "<exe>.go4updates.old" back to "<exe>". See the repository README for the
 // full support matrix and recovery procedures.
 //
-// The backup is removed only by [Installer.Cleanup], which applications
-// should call after successful initialization or a health check — reaching
-// the new binary proves it starts, not that it is healthy. Cleanup is an
-// artifact collector, not a rollback mechanism.
+// The backup is removed only by [Updater.Cleanup] (or [Installer.Cleanup]
+// directly), which applications should call after successful initialization
+// or a health check — reaching the new binary proves it starts, not that it
+// is healthy. Cleanup is an artifact collector, not a rollback mechanism.
 package selfupdate

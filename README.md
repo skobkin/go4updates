@@ -377,6 +377,12 @@ if err != nil {
 }
 
 fmt.Printf("installed %s; previous binary kept at %s\n", applied.Version, applied.Backup)
+
+// After restarting into the new version and confirming it is healthy
+// (initialization or a health check), retire the backup:
+if err := updater.Cleanup(); err != nil {
+    return err
+}
 ```
 
 ### Periodic checking with a watcher
@@ -404,7 +410,7 @@ for event := range events {
         continue
     }
 
-    log.Printf("installed %s; restart to run it, then call Cleanup after a healthy startup (backup: %s)",
+    log.Printf("installed %s; restart to run it, then call updater.Cleanup after a healthy startup (backup: %s)",
         applied.Version, applied.Backup)
 }
 ```
@@ -459,8 +465,8 @@ of scope.
 ### Backup lifecycle
 
 After a successful update the previous binary remains at
-`<exe>.go4updates.old`. It is removed only by `Installer.Cleanup`, which the
-library never calls on its own. Call it from the application **after
+`<exe>.go4updates.old`. It is removed only by `Updater.Cleanup` (or
+`Installer.Cleanup` directly), which the library never calls on its own. Call it from the application **after
 successful initialization or a health check** — reaching the new binary proves
 it starts, not that it works — and never before: until then the backup is the
 only rollback material. `Cleanup` is an artifact collector and interrupted-

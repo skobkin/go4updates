@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -537,6 +538,35 @@ func TestApplyAssetSelectionErrors(t *testing.T) {
 			t.Fatalf("err = %v, want ErrAmbiguousAsset", err)
 		}
 	})
+}
+
+func TestUpdaterCleanupRetiresBackup(t *testing.T) {
+	f := newUpdateFixture(t)
+
+	u, err := New(WithTargetPath(f.target), WithAppName(fixtureAppName), WithHTTPClient(f.srv.Client()))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if _, err := u.Apply(t.Context(), f.result()); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	if got := readFileForTest(t, f.target+BackupSuffix); got != oldPayload {
+		t.Fatalf("backup content = %q, want %q", got, oldPayload)
+	}
+
+	if err := u.Cleanup(); err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+
+	if _, statErr := os.Lstat(f.target + BackupSuffix); !errors.Is(statErr, fs.ErrNotExist) {
+		t.Errorf("backup stat = %v, want removed", statErr)
+	}
+
+	if got := readFileForTest(t, f.target); got != newPayload {
+		t.Errorf("installed content = %q, want %q", got, newPayload)
+	}
 }
 
 func TestSelectAssetPreview(t *testing.T) {
