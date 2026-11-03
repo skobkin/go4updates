@@ -189,6 +189,45 @@ func TestInstallBackupIsHardlinkOfOldBinary(t *testing.T) {
 	}
 }
 
+// The attempt-backup removal after a failed replacement is best-effort:
+// when it fails too, the error must say so and the backup must survive,
+// even though the retry will then be blocked by ErrBackupExists.
+func TestInstallFailedReplacementRemovalFailureIsReported(t *testing.T) {
+	dir := t.TempDir()
+
+	target := filepath.Join(dir, "app")
+	backup := target + BackupSuffix
+
+	writeTarget(t, target, "v1", 0o755)
+
+	i := newTestInstaller(t, target)
+
+	i.renameFn = func(_, _ string) error {
+		return errors.New("injected rename failure")
+	}
+
+	i.removeFn = func(string) error {
+		return errors.New("injected remove failure")
+	}
+
+	_, err := i.Install(t.Context(), stagedFile(t, dir, "v2"))
+	if err == nil {
+		t.Fatal("Install should fail on the injected rename failure")
+	}
+
+	if !strings.Contains(err.Error(), "removing the attempt backup") {
+		t.Errorf("error should report the failed attempt-backup removal, got: %v", err)
+	}
+
+	if got := readFileForTest(t, target); got != "v1" {
+		t.Errorf("target content = %q, want untouched v1", got)
+	}
+
+	if got := readFileForTest(t, backup); got != "v1" {
+		t.Errorf("backup content = %q, want v1 (best-effort removal failed)", got)
+	}
+}
+
 func TestInstallRefusesBackupWhenTargetMissing(t *testing.T) {
 	dir := t.TempDir()
 

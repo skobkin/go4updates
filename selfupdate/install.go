@@ -223,7 +223,7 @@ func (i *Installer) installUnix(ctx context.Context, stagedPath, target, backup 
 
 	if err := ctx.Err(); err != nil {
 		if backupCreated {
-			_ = os.Remove(backup)
+			_ = i.removeFn(backup)
 		}
 
 		return "", fmt.Errorf("go4updates/selfupdate: install canceled: %w", err)
@@ -234,7 +234,7 @@ func (i *Installer) installUnix(ctx context.Context, stagedPath, target, backup 
 		// is now redundant and is removed so a retry is not blocked; a
 		// pre-existing backup never reaches this path (checked above).
 		if backupCreated {
-			if rmErr := os.Remove(backup); rmErr != nil {
+			if rmErr := i.removeFn(backup); rmErr != nil {
 				return "", fmt.Errorf("go4updates/selfupdate: replacing %s: %w (removing the attempt backup %s also failed: %v)",
 					target, err, backup, rmErr)
 			}
@@ -383,7 +383,7 @@ func (i *Installer) publishBackup(target, backup string) (created bool, err erro
 	if err := i.copyFn(tmp, target); err != nil {
 		_ = tmp.Close()
 
-		_ = os.Remove(tmp.Name())
+		_ = i.removeFn(tmp.Name())
 
 		return false, fmt.Errorf("go4updates/selfupdate: copying %s to the backup: %w", target, err)
 	}
@@ -391,27 +391,27 @@ func (i *Installer) publishBackup(target, backup string) (created bool, err erro
 	if err := tmp.Sync(); err != nil {
 		_ = tmp.Close()
 
-		_ = os.Remove(tmp.Name())
+		_ = i.removeFn(tmp.Name())
 
 		return false, fmt.Errorf("go4updates/selfupdate: syncing the backup copy: %w", err)
 	}
 
 	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmp.Name())
+		_ = i.removeFn(tmp.Name())
 
 		return false, fmt.Errorf("go4updates/selfupdate: closing the backup copy: %w", err)
 	}
 
 	// Re-check before publication so a racing backup is never replaced.
 	if _, err := os.Lstat(backup); err == nil {
-		_ = os.Remove(tmp.Name())
+		_ = i.removeFn(tmp.Name())
 
 		return false, fmt.Errorf("%w: %s appeared concurrently (cross-process updates are unsupported)",
 			ErrBackupExists, backup)
 	}
 
 	if err := i.renameFn(tmp.Name(), backup); err != nil {
-		_ = os.Remove(tmp.Name())
+		_ = i.removeFn(tmp.Name())
 
 		return false, fmt.Errorf("go4updates/selfupdate: publishing backup %s: %w", backup, err)
 	}
