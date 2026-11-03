@@ -167,8 +167,10 @@ const DefaultMaxExtractedBytes int64 = 512 << 20 // 512 MiB
 // Directories are skipped; a non-regular entry (symlink, device) whose base
 // name matches the executable disqualifies the archive — bytes are never
 // extracted through a link. Several qualifying members are an ambiguity
-// error, never an arbitrary pick. When no member matches and the archive
-// contains exactly one regular file, that file wins.
+// error, never an arbitrary pick. A member whose base name does not match
+// is never installed: there is no fallback that guesses among regular
+// files, so an archive without a name-matched executable fails with
+// [ErrExecutableNotFound] instead of silently installing a README.
 //
 // The extracted byte count is bounded by maxExtracted, enforced while
 // streaming decompressed data. What the bound covers is format-dependent by
@@ -291,16 +293,14 @@ type zipCandidate struct {
 type zipScan struct {
 	candidates []zipCandidate
 
-	// regularCount is the number of regular-file members.
+	// regularCount is the number of regular-file members, reported in the
+	// not-found error so a missing executable is distinguishable from an
+	// empty archive.
 	regularCount int
 
 	// disqualified reports that a non-regular member matches the executable
 	// name: the archive must not be extracted at all.
 	disqualified bool
-
-	// onlyRegular is the single regular member when regularCount == 1, for
-	// the single-file fallback.
-	onlyRegular *zip.File
 }
 
 // scanZip classifies the archive members. Only regular files qualify as the
@@ -332,14 +332,6 @@ func scanZip(files []*zip.File, executable string) zipScan {
 		}
 
 		scan.regularCount++
-
-		switch scan.regularCount {
-		case 1:
-			scan.onlyRegular = f
-
-		default:
-			scan.onlyRegular = nil
-		}
 
 		if strings.EqualFold(base, executable) {
 			scan.candidates = append(scan.candidates, zipCandidate{file: f, name: name})
@@ -387,11 +379,6 @@ func extractFromZip(archivePath, executable, dstPath string, maxExtracted int64)
 
 	case len(scan.candidates) == 1:
 		chosen = scan.candidates[0]
-
-	case scan.onlyRegular != nil:
-		// Single-file fallback: with no name match and exactly one regular
-		// file, that file is the executable.
-		chosen = zipCandidate{file: scan.onlyRegular, name: scan.onlyRegular.Name}
 	}
 
 	if chosen.file == nil {
@@ -446,22 +433,16 @@ func extractGzipMember(archivePath, dstPath string, maxExtracted int64) error {
 //
 // Tar streams are sequential, so the scan is single-pass: the first matching
 // member is extracted while the scan continues, and a second match aborts
-// with an ambiguity error. The first non-matching regular file is spooled to
-// a side file so the single-file fallback can still work without buffering
-// it in memory or rewinding the stream. On error, no partial output survives
-// at dstPath.
+// with an ambiguity error. Members whose base name does not match are never
+// installed — there is no fallback that guesses among regular files, so an
+// archive without a name-matched executable fails with
+// [ErrExecutableNotFound]. On error, no partial output survives at dstPath.
 func extractFromTar(r io.Reader, executable, dstPath string) error {
-	const spoolSuffix = ".fallback"
-
-	spoolPath := dstPath + spoolSuffix
-
 	ok := false
 
 	defer func() {
 		if !ok {
 			_ = os.Remove(dstPath)
-
-			_ = os.Remove(spoolPath)
 		}
 	}()
 
@@ -470,7 +451,6 @@ func extractFromTar(r io.Reader, executable, dstPath string) error {
 	var (
 		matches      []string
 		regularCount int
-		spoolOpen    bool
 	)
 
 	for {
@@ -502,68 +482,30 @@ func extractFromTar(r io.Reader, executable, dstPath string) error {
 
 		regularCount++
 
-		if strings.EqualFold(base, executable) {
-			matches = append(matches, hdr.Name)
-
-			if len(matches) > 1 {
-				return fmt.Errorf("%w: %s", ErrAmbiguousExecutable, joinQuoted(matches))
-			}
-
-			if err := streamToFile(dstPath, tr); err != nil {
-				return fmt.Errorf("go4updates/selfupdate: extracting archive member %q: %w", hdr.Name, err)
-			}
-
-			if spoolOpen {
-				_ = os.Remove(spoolPath)
-
-				spoolOpen = false
-			}
-
+		if !strings.EqualFold(base, executable) {
+			// A non-matching regular file: never a fallback candidate.
 			continue
 		}
 
-		// A non-matching regular file.
-		switch {
-		case len(matches) > 0:
-			// The named candidate already won; a fallback is impossible.
+		matches = append(matches, hdr.Name)
 
-		case regularCount == 1:
-			// Might be the archive's only regular file; spool it as the
-			// fallback candidate.
-			if err := streamToFile(spoolPath, tr); err != nil {
-				return fmt.Errorf("go4updates/selfupdate: staging fallback member %q: %w", hdr.Name, err)
-			}
+		if len(matches) > 1 {
+			return fmt.Errorf("%w: %s", ErrAmbiguousExecutable, joinQuoted(matches))
+		}
 
-			spoolOpen = true
-
-		case spoolOpen:
-			// A second regular file while spooling: the single-file
-			// fallback is impossible; drop the spool.
-			_ = os.Remove(spoolPath)
-
-			spoolOpen = false
+		if err := streamToFile(dstPath, tr); err != nil {
+			return fmt.Errorf("go4updates/selfupdate: extracting archive member %q: %w", hdr.Name, err)
 		}
 	}
 
-	switch {
-	case len(matches) == 1:
+	if len(matches) == 1 {
 		ok = true
 
 		return nil
-
-	case spoolOpen:
-		if err := os.Rename(spoolPath, dstPath); err != nil {
-			return fmt.Errorf("go4updates/selfupdate: publishing extracted executable: %w", err)
-		}
-
-		ok = true
-
-		return nil
-
-	default:
-		return fmt.Errorf("%w: looked for %q among %d regular files",
-			ErrExecutableNotFound, executable, regularCount)
 	}
+
+	return fmt.Errorf("%w: looked for %q among %d regular files",
+		ErrExecutableNotFound, executable, regularCount)
 }
 
 // copyBounded streams r into dstPath through a [boundedReader], failing

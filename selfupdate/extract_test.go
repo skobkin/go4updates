@@ -376,17 +376,33 @@ func TestExtractBinaryFormats(t *testing.T) {
 func TestExtractBinarySelection(t *testing.T) {
 	payload := "chosen"
 
-	t.Run("single-file fallback", func(t *testing.T) {
+	t.Run("unrelated single regular file is not installed", func(t *testing.T) {
 		dir := t.TempDir()
 		path := buildZip(t, dir, []zipEntry{{name: "weird-inner-name", content: payload}})
 
-		got, err := extractForTest(t, path, "app_1.0.0_linux_amd64.zip", "app", "linux", DefaultMaxExtractedBytes)
-		if err != nil {
-			t.Fatalf("extractBinary: %v", err)
+		_, err := extractForTest(t, path, "app_1.0.0_linux_amd64.zip", "app", "linux", DefaultMaxExtractedBytes)
+		if !errors.Is(err, ErrExecutableNotFound) {
+			t.Fatalf("err = %v, want ErrExecutableNotFound: an arbitrary regular file must never be installed as the executable", err)
 		}
+	})
 
-		if got != payload {
-			t.Errorf("extracted %q, want %q", got, payload)
+	t.Run("zip containing only README.txt fails", func(t *testing.T) {
+		dir := t.TempDir()
+		path := buildZip(t, dir, []zipEntry{{name: "README.txt", content: "readme"}})
+
+		_, err := extractForTest(t, path, "app_1.0.0_linux_amd64.zip", "app", "linux", DefaultMaxExtractedBytes)
+		if !errors.Is(err, ErrExecutableNotFound) {
+			t.Fatalf("err = %v, want ErrExecutableNotFound", err)
+		}
+	})
+
+	t.Run("zip containing only LICENSE fails", func(t *testing.T) {
+		dir := t.TempDir()
+		path := buildZip(t, dir, []zipEntry{{name: "LICENSE", content: "MIT"}})
+
+		_, err := extractForTest(t, path, "app_1.0.0_linux_amd64.zip", "app", "linux", DefaultMaxExtractedBytes)
+		if !errors.Is(err, ErrExecutableNotFound) {
+			t.Fatalf("err = %v, want ErrExecutableNotFound", err)
 		}
 	})
 
@@ -433,10 +449,10 @@ func TestExtractBinarySelection(t *testing.T) {
 		}
 	})
 
-	t.Run("tar named candidate beats spooled fallback", func(t *testing.T) {
+	t.Run("tar named candidate among other files", func(t *testing.T) {
 		dir := t.TempDir()
 		path, assetName := buildTar(t, dir, false, []tarEntry{
-			{name: "unknown-name", content: "spooled"},
+			{name: "unknown-name", content: "other"},
 			{name: "app", content: payload},
 		})
 
@@ -450,20 +466,16 @@ func TestExtractBinarySelection(t *testing.T) {
 		}
 	})
 
-	t.Run("tar fallback when only one regular file", func(t *testing.T) {
+	t.Run("tar with only an unrelated regular file fails", func(t *testing.T) {
 		dir := t.TempDir()
 		path, assetName := buildTar(t, dir, false, []tarEntry{
-			{name: "somedir/", dir: true},
-			{name: "the-only-file", content: payload},
+			{name: "docs/", dir: true},
+			{name: "README.txt", content: "readme"},
 		})
 
-		got, err := extractForTest(t, path, assetName, "app", "linux", DefaultMaxExtractedBytes)
-		if err != nil {
-			t.Fatalf("extractBinary: %v", err)
-		}
-
-		if got != payload {
-			t.Errorf("extracted %q, want %q", got, payload)
+		_, err := extractForTest(t, path, assetName, "app", "linux", DefaultMaxExtractedBytes)
+		if !errors.Is(err, ErrExecutableNotFound) {
+			t.Fatalf("err = %v, want ErrExecutableNotFound: an arbitrary regular file must never be installed as the executable", err)
 		}
 	})
 
@@ -665,8 +677,7 @@ func TestExtractZipDeclaredEntryFloodRejectedBeforeParsing(t *testing.T) {
 // Regression: zip members authored on Windows separate path elements with
 // backslashes, but path.Base only splits on "/", so the member name was
 // compared as a whole and the executable was reported missing even though it
-// was unambiguous. The second regular file defeats the single-file fallback
-// that would otherwise have masked the bug.
+// was unambiguous.
 func TestExtractZipWindowsBackslashMember(t *testing.T) {
 	dir := t.TempDir()
 
