@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 
@@ -131,7 +132,17 @@ func (d *Downloader) Download(ctx context.Context, asset updates.Asset, w io.Wri
 			ErrAssetTooLarge, asset.Name, resp.ContentLength, d.maxBytes)
 	}
 
-	n, err := io.Copy(w, io.LimitReader(resp.Body, d.maxBytes+1))
+	// The LimitReader sentinel (limit+1) would overflow for a limit of
+	// math.MaxInt64, truncating the transfer to zero bytes; only apply it
+	// when there is headroom, the streamed-byte check below covers the
+	// rest.
+	body := io.Reader(resp.Body)
+
+	if d.maxBytes < math.MaxInt64 {
+		body = io.LimitReader(body, d.maxBytes+1)
+	}
+
+	n, err := io.Copy(w, body)
 	if err != nil {
 		return fmt.Errorf("go4updates/selfupdate: downloading asset %q: %w", asset.Name, err)
 	}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -283,6 +284,31 @@ func TestDownloadCallerClientNotMutated(t *testing.T) {
 
 	if caller.Transport != transportBefore {
 		t.Error("caller Transport was replaced")
+	}
+}
+
+// Regression: with WithMaxAssetBytes(math.MaxInt64), the former
+// io.LimitReader(max+1) bound overflowed to a negative N and Download
+// returned success having written zero bytes.
+func TestDownloadMaxInt64BoundDoesNotTruncate(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, "payload")
+	}))
+	t.Cleanup(srv.Close)
+
+	d, err := NewDownloader(WithMaxAssetBytes(math.MaxInt64), WithHTTPClient(srv.Client()))
+	if err != nil {
+		t.Fatalf("NewDownloader: %v", err)
+	}
+
+	var buf bytes.Buffer
+
+	if err := d.Download(t.Context(), updates.Asset{Name: "app", URL: srv.URL}, &buf); err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+
+	if buf.String() != "payload" {
+		t.Errorf("downloaded %q, want payload", buf.String())
 	}
 }
 
