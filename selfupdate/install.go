@@ -480,7 +480,12 @@ func (i *Installer) publishBackup(target, backup string) (created bool, err erro
 // removing a backup whose old process still runs fails with a sharing
 // violation; the error is collected and the removal retried successfully at
 // the next startup.
-func (i *Installer) Cleanup() error {
+//
+// ctx is checked between the steps: a canceled context stops the cleanup
+// and returns the cancellation error joined with the problems collected so
+// far, keeping everything not yet processed — a canceled run never retires
+// the backup.
+func (i *Installer) Cleanup(ctx context.Context) error {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
@@ -494,6 +499,21 @@ func (i *Installer) Cleanup() error {
 	backup := target + BackupSuffix
 
 	var problems []error
+
+	// canceled aborts the remaining steps when ctx is done, reporting the
+	// cancellation together with the problems collected so far.
+	canceled := func() error {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(append(problems,
+				fmt.Errorf("go4updates/selfupdate: cleanup canceled: %w", err))...)
+		}
+
+		return nil
+	}
+
+	if err := canceled(); err != nil {
+		return err
+	}
 
 	// 1. Recovery: restore the backup when the target is missing.
 	_, statErr := os.Lstat(target)
@@ -518,6 +538,10 @@ func (i *Installer) Cleanup() error {
 		problems = append(problems, fmt.Errorf("inspecting %s: %w", target, statErr))
 	}
 
+	if err := canceled(); err != nil {
+		return err
+	}
+
 	// 2. Remove leftover staging artifacts.
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -532,6 +556,10 @@ func (i *Installer) Cleanup() error {
 				problems = append(problems, fmt.Errorf("removing %s: %w", e.Name(), err))
 			}
 		}
+	}
+
+	if err := canceled(); err != nil {
+		return err
 	}
 
 	// 3. Retire the backup (gone already if it was just restored) — but only

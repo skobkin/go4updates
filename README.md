@@ -381,7 +381,7 @@ fmt.Printf("installed %s; previous binary kept at %s\n", applied.Version, applie
 
 // After restarting into the new version and confirming it is healthy
 // (initialization or a health check), retire the backup:
-if err := updater.Cleanup(); err != nil {
+if err := updater.Cleanup(ctx); err != nil {
     return err
 }
 ```

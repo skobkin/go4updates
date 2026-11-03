@@ -560,7 +560,7 @@ func TestUpdaterCleanupRetiresBackup(t *testing.T) {
 		t.Fatalf("backup content = %q, want %q", got, oldPayload)
 	}
 
-	if err := u.Cleanup(); err != nil {
+	if err := u.Cleanup(t.Context()); err != nil {
 		t.Fatalf("Cleanup: %v", err)
 	}
 

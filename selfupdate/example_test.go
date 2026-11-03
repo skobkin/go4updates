@@ -65,7 +65,7 @@ func ExampleUpdater_Apply() {
 
 	// After restarting into the new version and confirming it is healthy
 	// (initialization or a health check), retire the backup:
-	if err := updater.Cleanup(); err != nil {
+	if err := updater.Cleanup(context.Background()); err != nil {
 		log.Printf("cleanup: %v", err)
 	}
 }

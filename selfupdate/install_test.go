@@ -718,7 +718,7 @@ func TestRepeatedUpdateWithCleanupBetween(t *testing.T) {
 		t.Fatalf("err = %v, want ErrBackupExists", err)
 	}
 
-	if err := i.Cleanup(); err != nil {
+	if err := i.Cleanup(t.Context()); err != nil {
 		t.Fatalf("Cleanup: %v", err)
 	}
 
@@ -756,7 +756,7 @@ func TestCleanupRestoresMissingTarget(t *testing.T) {
 
 	i := newTestInstaller(t, target)
 
-	if err := i.Cleanup(); err != nil {
+	if err := i.Cleanup(t.Context()); err != nil {
 		t.Fatalf("Cleanup: %v", err)
 	}
 
@@ -784,7 +784,7 @@ func TestCleanupRecoveryWithExplicitTarget(t *testing.T) {
 		t.Fatalf("NewInstaller: %v", err)
 	}
 
-	if err := i.Cleanup(); err != nil {
+	if err := i.Cleanup(t.Context()); err != nil {
 		t.Fatalf("Cleanup: %v", err)
 	}
 
@@ -815,7 +815,7 @@ func TestCleanupRemovesStagingArtifacts(t *testing.T) {
 
 	i := newTestInstaller(t, target)
 
-	if err := i.Cleanup(); err != nil {
+	if err := i.Cleanup(t.Context()); err != nil {
 		t.Fatalf("Cleanup: %v", err)
 	}
 
@@ -851,7 +851,7 @@ func TestCleanupKeepsBackupWhenRecoveryFails(t *testing.T) {
 		return errors.New("injected rename failure")
 	}
 
-	err := i.Cleanup()
+	err := i.Cleanup(t.Context())
 	if err == nil {
 		t.Fatal("Cleanup should report the failed recovery")
 	}
@@ -887,7 +887,7 @@ func TestCleanupBestEffortWithUnremovableFiles(t *testing.T) {
 		return fmt.Errorf("injected removal failure for %s", path)
 	}
 
-	err := i.Cleanup()
+	err := i.Cleanup(t.Context())
 	if err == nil {
 		t.Fatal("Cleanup should report the unremovable artifacts")
 	}
@@ -928,7 +928,7 @@ func TestCleanupMatchesSanitizedStagingNames(t *testing.T) {
 
 	i := newTestInstaller(t, target)
 
-	if err := i.Cleanup(); err != nil {
+	if err := i.Cleanup(t.Context()); err != nil {
 		t.Fatalf("Cleanup: %v", err)
 	}
 
@@ -958,8 +958,64 @@ func TestCleanupFreshInstallerIsClean(t *testing.T) {
 
 	i := newTestInstaller(t, target)
 
-	if err := i.Cleanup(); err != nil {
+	if err := i.Cleanup(t.Context()); err != nil {
 		t.Errorf("Cleanup on a fresh target: %v", err)
+	}
+}
+
+// The ctx contract: a canceled context stops the cleanup between its steps.
+// Work already completed stays done, and a canceled run never retires the
+// backup — the rollback material is not destroyed by the run that was told
+// to stop.
+func TestCleanupCanceledContextRetainsBackup(t *testing.T) {
+	dir := t.TempDir()
+
+	target := filepath.Join(dir, "app")
+	writeTarget(t, target, "v2", 0o755)
+
+	if err := os.WriteFile(target+BackupSuffix, []byte("v1"), 0o755); err != nil {
+		t.Fatalf("writing backup: %v", err)
+	}
+
+	// A leftover staging artifact so the sweep has something to remove.
+	leftover := filepath.Join(dir, "app.go4updates.tmp123")
+
+	if err := os.WriteFile(leftover, []byte("litter"), 0o600); err != nil {
+		t.Fatalf("writing leftover: %v", err)
+	}
+
+	i := newTestInstaller(t, target)
+
+	ctx, cancel := context.WithCancel(t.Context())
+
+	// Cancel from the middle of the staging sweep: the removal in progress
+	// completes, the checkpoint after the step aborts before the backup
+	// retirement.
+	first := true
+
+	i.removeFn = func(name string) error {
+		if first {
+			first = false
+
+			cancel()
+		}
+
+		return os.Remove(name)
+	}
+
+	err := i.Cleanup(ctx)
+	cancel()
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+
+	if _, statErr := os.Lstat(leftover); !errors.Is(statErr, fs.ErrNotExist) {
+		t.Errorf("leftover stat = %v, want the in-progress removal kept", statErr)
+	}
+
+	if _, statErr := os.Lstat(target + BackupSuffix); statErr != nil {
+		t.Errorf("backup stat = %v, want the backup retained by a canceled cleanup", statErr)
 	}
 }
 

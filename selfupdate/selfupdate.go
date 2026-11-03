@@ -292,13 +292,14 @@ func (u *Updater) Apply(ctx context.Context, result updates.Result) (Applied, er
 // Cleanup removes the artifacts of a completed Apply — most importantly the
 // backup of the previous version — and recovers an interrupted install where
 // possible. It is shorthand for [Installer.Cleanup] on the Updater's
-// installer.
+// installer; ctx is checked between its steps, and a canceled run never
+// retires the backup.
 //
 // The library never calls Cleanup on its own. Call it after successful
 // initialization or an application-defined health check — reaching the new
 // binary proves it starts, not that it is healthy — and never before: until
 // then the backup is the only rollback material. Cleanup is an artifact
 // collector and interrupted-update recovery tool, not a rollback mechanism.
-func (u *Updater) Cleanup() error {
-	return u.installer.Cleanup()
+func (u *Updater) Cleanup(ctx context.Context) error {
+	return u.installer.Cleanup(ctx)
 }

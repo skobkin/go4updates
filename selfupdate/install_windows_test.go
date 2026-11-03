@@ -225,7 +225,7 @@ func TestCleanupWindowsRestoresMissingTarget(t *testing.T) {
 		t.Fatalf("NewInstaller: %v", err)
 	}
 
-	if err := i.Cleanup(); err != nil {
+	if err := i.Cleanup(t.Context()); err != nil {
 		t.Fatalf("Cleanup: %v", err)
 	}
 
@@ -254,7 +254,7 @@ func TestCleanupWindowsRetiresBackup(t *testing.T) {
 		t.Fatalf("NewInstaller: %v", err)
 	}
 
-	if err := i.Cleanup(); err != nil {
+	if err := i.Cleanup(t.Context()); err != nil {
 		t.Fatalf("Cleanup: %v", err)
 	}
 
