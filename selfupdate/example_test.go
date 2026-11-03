@@ -1,6 +1,7 @@
 package selfupdate_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
@@ -8,7 +9,6 @@ import (
 	"errors"
 	"io"
 	"log"
-	"net/http"
 	"time"
 
 	updates "github.com/skobkin/go4updates"
@@ -143,6 +143,12 @@ func updateConfirmedByUser(string) bool {
 // digest of the downloaded archive. Signature verification authenticates
 // the publisher; the checksum covered by the signature provides the
 // integrity check for the archive bytes.
+//
+// The signature asset is fetched through [selfupdate.Downloader], so the
+// package's HTTPS-only transport policy (enforced on every redirect hop)
+// and size bounds apply to the signature too: fetching it with a bare
+// http.Client would bypass both, defeating the publisher-authentication
+// guarantee this verifier exists to provide.
 type ed25519Verifier struct {
 	// publicKey is the publisher's ed25519 public key, embedded in the
 	// application binary.
@@ -164,24 +170,14 @@ func (v ed25519Verifier) Verify(ctx context.Context, release updates.Release, as
 		return errors.New("no signature asset published for " + asset.Name)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, signature.URL, nil)
+	downloader, err := selfupdate.NewDownloader(selfupdate.WithMaxAssetBytes(64 << 10))
 	if err != nil {
 		return err
 	}
 
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
+	var sig bytes.Buffer
 
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return errors.New("signature download failed")
-	}
-
-	sig, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	if err != nil {
+	if err := downloader.Download(ctx, *signature, &sig); err != nil {
 		return err
 	}
 
@@ -191,7 +187,7 @@ func (v ed25519Verifier) Verify(ctx context.Context, release updates.Release, as
 		return err
 	}
 
-	if !ed25519.Verify(v.publicKey, digest.Sum(nil), sig) {
+	if !ed25519.Verify(v.publicKey, digest.Sum(nil), sig.Bytes()) {
 		return errors.New("signature mismatch")
 	}
 
