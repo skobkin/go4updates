@@ -8,12 +8,32 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+// Regression: with WithMaxExtractedBytes(math.MaxInt64), the former
+// io.LimitReader(max+1) bound overflowed to a negative N and truncated the
+// member to zero bytes while every size check passed.
+func TestExtractMaxInt64BoundDoesNotTruncate(t *testing.T) {
+	dir := t.TempDir()
+
+	archivePath := buildZip(t, dir, []zipEntry{{name: "app", content: "payload"}})
+
+	dstPath := filepath.Join(dir, "staged")
+
+	if err := extractBinary(archivePath, "app_1.0.0_linux_amd64.zip", "app", "linux", dstPath, math.MaxInt64); err != nil {
+		t.Fatalf("extractBinary: %v", err)
+	}
+
+	if got := readFileForTest(t, dstPath); got != "payload" {
+		t.Errorf("extracted content = %q, want payload", got)
+	}
+}
 
 // zipEntry describes one member of a built test archive.
 type zipEntry struct {

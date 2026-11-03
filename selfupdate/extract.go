@@ -419,35 +419,13 @@ func extractFromTar(r io.Reader, executable, dstPath string) error {
 	}
 }
 
-// copyBounded streams r into dstPath, failing with [ErrExtractedTooLarge]
-// once more than maxExtracted bytes are read.
+// copyBounded streams r into dstPath through a [boundedReader], failing
+// with [ErrExtractedTooLarge] once more than maxExtracted bytes are read.
+// The counting reader is used directly instead of an io.LimitReader(max+1)
+// wrapper, which would overflow for a maxExtracted of math.MaxInt64 and
+// silently truncate the member to zero bytes.
 func copyBounded(dstPath string, r io.Reader, maxExtracted int64) error {
-	bounded := &byteCounter{r: io.LimitReader(r, maxExtracted+1)}
-
-	if err := streamToFile(dstPath, bounded); err != nil {
-		return err
-	}
-
-	if bounded.n > maxExtracted {
-		return fmt.Errorf("%w: member exceeds %d bytes", ErrExtractedTooLarge, maxExtracted)
-	}
-
-	return nil
-}
-
-// byteCounter counts the bytes read through it.
-type byteCounter struct {
-	r io.Reader
-	n int64
-}
-
-// Read implements io.Reader.
-func (c *byteCounter) Read(p []byte) (int, error) {
-	n, err := c.r.Read(p)
-
-	c.n += int64(n)
-
-	return n, err
+	return streamToFile(dstPath, &boundedReader{r: r, maxBytes: maxExtracted})
 }
 
 // namesOf lists candidate names for error messages.
