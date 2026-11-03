@@ -56,11 +56,21 @@ func TestMatchAssetName(t *testing.T) {
 		{name: "windows zip", asset: "app_1.2.3_windows_amd64.zip", app: "app", goos: "windows", goarch: "amd64", wantMatch: true},
 		{name: "windows raw without exe", asset: "app_1.2.3_windows_amd64", app: "app", goos: "windows", goarch: "amd64", wantMatch: false},
 
-		// Never-installable names.
+		// Never-installable names. These are rejected structurally — their
+		// extensions and trailing tokens are not part of the convention —
+		// not by scanning the name for blocked words.
 		{name: "sha256 sibling", asset: "app_1.2.3_linux_amd64.tar.gz.sha256", app: "app", goos: "linux", goarch: "amd64", wantMatch: false},
 		{name: "checksum manifest", asset: "checksums.txt", app: "app", goos: "linux", goarch: "amd64", wantMatch: false},
 		{name: "signature", asset: "app_1.2.3_linux_amd64.tar.gz.sig", app: "app", goos: "linux", goarch: "amd64", wantMatch: false},
 		{name: "sbom", asset: "app_1.2.3.sbom.json", app: "app", goos: "linux", goarch: "amd64", wantMatch: false},
+		{name: "detached signature", asset: "app_1.2.3_linux_amd64.tar.gz.asc", app: "app", goos: "linux", goarch: "amd64", wantMatch: false},
+		{name: "provenance file", asset: "app_1.2.3_linux_amd64.tar.gz.intoto.jsonl", app: "app", goos: "linux", goarch: "amd64", wantMatch: false},
+
+		// Application names that merely contain blocked words must match:
+		// the former whole-name substring scan rejected them permanently.
+		{name: "app named signal", asset: "signal_2.0.0_linux_amd64.tar.gz", app: "signal", goos: "linux", goarch: "amd64", wantMatch: true},
+		{name: "app named design", asset: "design_1.0.0_darwin_arm64.zip", app: "design", goos: "darwin", goarch: "arm64", wantMatch: true},
+		{name: "app named digest", asset: "digest_2.1.0_windows_amd64.exe", app: "digest", goos: "windows", goarch: "amd64", wantMatch: true},
 
 		// Unsupported archive extensions never match.
 		{name: "xz", asset: "app_1.2.3_linux_amd64.tar.xz", app: "app", goos: "linux", goarch: "amd64", wantMatch: false},

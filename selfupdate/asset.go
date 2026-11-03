@@ -109,30 +109,6 @@ func stripArchiveExt(name string, kind archiveKind) string {
 	}
 }
 
-// blockedSubstrings never match as installable assets: checksums,
-// signatures, manifests, and documentation files are not executables. The
-// list is deliberately conservative; publishers with colliding names should
-// use [WithAssetMatcher].
-var blockedSubstrings = []string{
-	"sha256", "sha512", "sha1", "md5", "checksum", "digest",
-	"sig", ".asc", ".pem", "sbom", "provenance",
-	"license", "readme", "changelog",
-}
-
-// blockedAssetName reports whether the file name looks like a checksum,
-// signature, or metadata file rather than an installable asset.
-func blockedAssetName(name string) bool {
-	lower := strings.ToLower(name)
-
-	for _, s := range blockedSubstrings {
-		if strings.Contains(lower, s) {
-			return true
-		}
-	}
-
-	return false
-}
-
 // osAliases maps a Go GOOS value to the tokens release publishers use for
 // it in asset file names.
 var osAliases = map[string][]string{
@@ -164,15 +140,15 @@ var archAliases = map[string][]string{
 // "amd64"). Token comparison is exact after lowercasing, so an application
 // name containing "_" or "-" never matches.
 //
-// Checksum, signature, manifest, and documentation file names never match.
-// Raw Windows assets must end in ".exe". Names with recognized but
-// unsupported archive extensions (.xz, .bz2, .zst, .7z, .rar) do not match.
+// Checksum, signature, manifest, SBOM, and documentation file names never
+// match: their file-name extensions and trailing tokens are not part of the
+// convention, so the conservative token match rejects them structurally.
+// An application whose own name happens to contain such words ("signal",
+// "design") is matched normally. Raw Windows assets must end in ".exe".
+// Names with recognized but unsupported archive extensions (.xz, .bz2,
+// .zst, .7z, .rar) do not match.
 func MatchAssetName(name, appName, goos, goarch string) bool {
 	if name == "" || appName == "" {
-		return false
-	}
-
-	if blockedAssetName(name) {
 		return false
 	}
 
