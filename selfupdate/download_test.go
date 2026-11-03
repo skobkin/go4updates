@@ -313,9 +313,17 @@ func TestDownloadMaxInt64BoundDoesNotTruncate(t *testing.T) {
 }
 
 func TestDownloadContextCancellation(t *testing.T) {
+	// Deterministic: cancellation happens only after the request reached
+	// the handler, so the test never depends on wall-clock scheduling —
+	// the former pinned 100ms deadline could expire before the request
+	// was dispatched on a slow machine.
+	started := make(chan struct{})
+
 	release := make(chan struct{})
 
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(started)
+
 		// Hold the response open until the test is done with the server.
 		<-release
 
@@ -331,14 +339,22 @@ func TestDownloadContextCancellation(t *testing.T) {
 		t.Fatalf("NewDownloader: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	var buf bytes.Buffer
 
-	err = d.Download(ctx, updates.Asset{Name: "app", URL: srv.URL}, &buf)
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("err = %v, want context.DeadlineExceeded", err)
+	errCh := make(chan error, 1)
+
+	go func() {
+		errCh <- d.Download(ctx, updates.Asset{Name: "app", URL: srv.URL}, &buf)
+	}()
+
+	<-started
+	cancel()
+
+	if err := <-errCh; !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
 	}
 }
 
