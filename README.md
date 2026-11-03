@@ -500,7 +500,9 @@ The default matcher expects goreleaser-style names:
 {app}[_{-}{version}]_{os}_{arch}[.{archive-ext}]
 ```
 
-OS and architecture tokens are matched through alias tables (`macos`/`osx` for
+The token order is enforced: the application token must come first, and the
+platform tokens last in os-then-arch order. OS and architecture tokens are
+matched through alias tables (`macos`/`osx` for
 `darwin`, `x86_64`/`x64` for `amd64`, `i386`/`x86` for `386`, `aarch64` for
 `arm64`, `armv6`/`armv7` for `arm`, `win32`/`win64` for `windows`). Supported
 archive extensions: `.zip`, `.tar.gz`, `.tgz`, `.tar`, `.gz`, and raw binaries

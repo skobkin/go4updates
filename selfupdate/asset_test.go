@@ -142,6 +142,33 @@ func TestMatchAssetNameAppNamedLikePlatformAlias(t *testing.T) {
 	}
 }
 
+// The convention is {app}[_{-}{version}]_{os}_{arch}: the application token
+// first, the platform tokens last in os-then-arch order. Names shuffling the
+// roles ("linux_app_amd64", "app_amd64_linux") are outside the convention
+// and fail conservatively instead of matching whatever they happen to
+// contain.
+func TestMatchAssetNameEnforcesTokenOrder(t *testing.T) {
+	for _, asset := range []string{
+		"linux_app_amd64.zip",
+		"app_amd64_linux.zip",
+		"amd64_linux_app.tar.gz",
+	} {
+		if MatchAssetName(asset, "app", "linux", "amd64") {
+			t.Errorf("MatchAssetName(%q) = true, want false: token order deviates from the convention", asset)
+		}
+	}
+
+	// Conventional order keeps matching, version labels between the
+	// application and platform tokens included.
+	if !MatchAssetName("app_1.2.3_linux_amd64.tar.gz", "app", "linux", "amd64") {
+		t.Error("MatchAssetName(app_1.2.3_linux_amd64.tar.gz) = false, want true")
+	}
+
+	if !MatchAssetName("app_linux_amd64.tar.gz", "app", "linux", "amd64") {
+		t.Error("MatchAssetName(app_linux_amd64.tar.gz) = false, want true")
+	}
+}
+
 func TestVersionish(t *testing.T) {
 	tests := []struct {
 		token string

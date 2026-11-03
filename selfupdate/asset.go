@@ -133,12 +133,17 @@ var archAliases = map[string][]string{
 //	{app}[_{-}{version}]_{os}_{arch}[.{archive-ext}]
 //
 // Tokens are the parts of the name split on "_" and "-". The application,
-// operating system, and architecture tokens must all be present; further
-// tokens are tolerated only when they look like version labels ("1.2.3",
-// "v2", "1.0.0-rc1"). OS and architecture tokens are matched through the
-// alias tables (for example "macos" and "osx" for "darwin", "x86_64" for
-// "amd64"). Token comparison is exact after lowercasing, so an application
-// name containing "_" or "-" never matches.
+// operating system, and architecture tokens must all be present, in the
+// documented order: the application token first, the platform tokens last
+// in os-then-arch order; names that shuffle the roles do not match. Further
+// tokens are tolerated between them only when they look like version labels
+// ("1.2.3", "v2", "1.0.0-rc1", "1.2.3-nightly"). OS and architecture tokens
+// are matched through the alias tables (for example "macos" and "osx" for
+// "darwin", "x86_64" for "amd64"). When the application name itself equals
+// a platform alias token, that token is claimed as the application name and
+// the platform token is expected later, where the convention places it.
+// Token comparison is exact after lowercasing, so an application name
+// containing "_" or "-" never matches.
 //
 // Checksum, signature, manifest, SBOM, and documentation file names never
 // match: their file-name extensions and trailing tokens are not part of the
@@ -184,7 +189,10 @@ func MatchAssetName(name, appName, goos, goarch string) bool {
 		return false
 	}
 
-	var foundApp, foundOS, foundArch bool
+	var (
+		foundApp, foundOS, foundArch bool
+		appIdx, osIdx, archIdx       int
+	)
 
 	tokens := strings.FieldsFunc(base, func(r rune) bool {
 		return r == '_' || r == '-'
@@ -199,18 +207,25 @@ func MatchAssetName(name, appName, goos, goarch string) bool {
 		// equal token falls through to the platform checks.
 		if !foundApp && tok == app {
 			foundApp = true
+			appIdx = i
 
 			continue
 		}
 
 		if slices.Contains(wantOS, tok) {
-			foundOS = true
+			if !foundOS {
+				foundOS = true
+				osIdx = i
+			}
 
 			continue
 		}
 
 		if slices.Contains(wantArch, tok) {
-			foundArch = true
+			if !foundArch {
+				foundArch = true
+				archIdx = i
+			}
 
 			continue
 		}
@@ -229,10 +244,16 @@ func MatchAssetName(name, appName, goos, goarch string) bool {
 
 			switch {
 			case slices.Contains(wantOS, merged):
-				foundOS = true
+				if !foundOS {
+					foundOS = true
+					osIdx = i
+				}
 
 			case slices.Contains(wantArch, merged):
-				foundArch = true
+				if !foundArch {
+					foundArch = true
+					archIdx = i
+				}
 
 			case versionish(merged):
 				// Joined version fragments stay tolerated.
@@ -273,7 +294,11 @@ func MatchAssetName(name, appName, goos, goarch string) bool {
 		return false
 	}
 
-	return foundApp && foundOS && foundArch
+	// The convention is {app}[_{-}{version}]_{os}_{arch}: the application
+	// token first, the platform tokens last in os-then-arch order. Names
+	// shuffling the roles are outside the convention and fail
+	// conservatively.
+	return foundApp && foundOS && foundArch && appIdx < osIdx && osIdx < archIdx
 }
 
 // versionish reports whether a token looks like a version or build label,
