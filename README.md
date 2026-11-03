@@ -107,8 +107,9 @@ attempt.
 A **result** contains the current version, upstream feed, latest release when
 one exists, comparison status, and check timestamp.
 
-Release metadata includes upstream asset information, but v0.1 intentionally
-does not download, install, verify, or roll back artifacts.
+Release metadata includes upstream asset information, but the core checking
+model only inspects it: downloading, verification, and installation are
+opt-in through the [selfupdate](#self-update) package.
 
 ## One-shot check
 
