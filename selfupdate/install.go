@@ -57,6 +57,7 @@ type Installer struct {
 	copyFn    func(dst io.Writer, srcPath string) error
 	renameFn  func(oldname, newname string) error
 	syncDirFn func(dir string) error
+	removeFn  func(name string) error
 }
 
 // NewInstaller creates an Installer from opts. It understands
@@ -88,6 +89,7 @@ func NewInstaller(opts ...Option) (*Installer, error) {
 		copyFn:    copyFileTo,
 		renameFn:  os.Rename,
 		syncDirFn: syncDir,
+		removeFn:  os.Remove,
 	}, nil
 }
 
@@ -453,14 +455,14 @@ func (i *Installer) Cleanup() error {
 				continue
 			}
 
-			if err := os.Remove(filepath.Join(dir, e.Name())); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			if err := i.removeFn(filepath.Join(dir, e.Name())); err != nil && !errors.Is(err, fs.ErrNotExist) {
 				problems = append(problems, fmt.Errorf("removing %s: %w", e.Name(), err))
 			}
 		}
 	}
 
 	// 3. Retire the backup (gone already if it was just restored).
-	if err := os.Remove(backup); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := i.removeFn(backup); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		problems = append(problems, fmt.Errorf("removing backup %s: %w", backup, err))
 	}
 

@@ -659,22 +659,27 @@ func TestCleanupBestEffortWithUnremovableFiles(t *testing.T) {
 
 	i := newTestInstaller(t, target)
 
-	// Make the directory read-only: removals fail, inspection still works.
-	if err := os.Chmod(dir, 0o500); err != nil {
-		t.Fatalf("chmod dir: %v", err)
+	// Removal failures are injected through the seam instead of produced
+	// with directory permission bits: CI containers run as root, and root
+	// ignores write-permission bits, so the permission trick is not
+	// deterministic across environments.
+	i.removeFn = func(path string) error {
+		return fmt.Errorf("injected removal failure for %s", path)
 	}
-
-	t.Cleanup(func() {
-		_ = os.Chmod(dir, 0o755)
-	})
 
 	err := i.Cleanup()
 	if err == nil {
 		t.Fatal("Cleanup should report the unremovable artifacts")
 	}
 
-	if !strings.Contains(err.Error(), BackupSuffix) && !strings.Contains(err.Error(), ".go4updates.download1") {
-		t.Errorf("error should name the blocked files, got: %v", err)
+	// Both blocked entries must be reported: reaching the backup removal
+	// after the staging failure also proves the sweep is best-effort.
+	if !strings.Contains(err.Error(), BackupSuffix) {
+		t.Errorf("error should name the blocked backup, got: %v", err)
+	}
+
+	if !strings.Contains(err.Error(), ".go4updates.download1") {
+		t.Errorf("error should name the blocked staging artifact, got: %v", err)
 	}
 }
 
