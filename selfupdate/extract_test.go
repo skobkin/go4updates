@@ -685,3 +685,63 @@ func TestExtractZipWindowsBackslashMember(t *testing.T) {
 		t.Errorf("extracted content = %q, want payload", got)
 	}
 }
+
+// Regression: the member-name comparison was case-sensitive, so a member
+// whose letter case disagreed with the application name was reported missing
+// even though it was unambiguous. Publishers disagree about case, and on
+// Windows file names are not case-sensitive at all.
+func TestExtractMemberNameCaseInsensitive(t *testing.T) {
+	t.Run("tar member with different case", func(t *testing.T) {
+		dir := t.TempDir()
+
+		path, assetName := buildTar(t, dir, true, []tarEntry{
+			{name: "./APP", content: "payload"},
+			{name: "NOTES.txt", content: "notes"},
+		})
+
+		dstPath := filepath.Join(dir, "staged")
+
+		if err := extractBinary(path, assetName, "app", "linux", dstPath, DefaultMaxExtractedBytes); err != nil {
+			t.Fatalf("extractBinary: %v", err)
+		}
+
+		if got := readFileForTest(t, dstPath); got != "payload" {
+			t.Errorf("extracted content = %q, want payload", got)
+		}
+	})
+
+	t.Run("zip member with different case", func(t *testing.T) {
+		dir := t.TempDir()
+
+		path := buildZip(t, dir, []zipEntry{
+			{name: `Sub\App.EXE`, content: "payload"},
+			{name: "README.txt", content: "readme"},
+		})
+
+		dstPath := filepath.Join(dir, "staged")
+
+		if err := extractBinary(path, "app_1.0.0_windows_amd64.zip", "app", "windows", dstPath, DefaultMaxExtractedBytes); err != nil {
+			t.Fatalf("extractBinary: %v", err)
+		}
+
+		if got := readFileForTest(t, dstPath); got != "payload" {
+			t.Errorf("extracted content = %q, want payload", got)
+		}
+	})
+
+	t.Run("case-insensitive ambiguity is still an error", func(t *testing.T) {
+		dir := t.TempDir()
+
+		path := buildZip(t, dir, []zipEntry{
+			{name: "app.exe", content: "v1"},
+			{name: "App.EXE", content: "v2"},
+		})
+
+		dstPath := filepath.Join(dir, "staged")
+
+		err := extractBinary(path, "app_1.0.0_windows_amd64.zip", "app", "windows", dstPath, DefaultMaxExtractedBytes)
+		if !errors.Is(err, ErrAmbiguousExecutable) {
+			t.Fatalf("err = %v, want ErrAmbiguousExecutable", err)
+		}
+	})
+}

@@ -155,12 +155,13 @@ const DefaultMaxExtractedBytes int64 = 512 << 20 // 512 MiB
 // binary); a recognized but unsupported format fails with
 // [ErrUnsupportedArchive] before the archive is opened.
 //
-// The executable is located by base-name comparison against the executable
-// name derived from appName and goos, at any archive depth. Zip member
-// paths that use backslash separators are normalized before the comparison.
-// Member names are only ever compared, never used to construct output
-// paths, so path traversal in archive entries ("zip slip") cannot escape
-// dstPath.
+// The executable is located by case-insensitive base-name comparison
+// against the executable name derived from appName and goos, at any archive
+// depth; several members differing only in letter case are an ambiguity
+// error. Zip member paths that use backslash separators are normalized
+// before the comparison. Member names are only ever compared, never used to
+// construct output paths, so path traversal in archive entries ("zip slip")
+// cannot escape dstPath.
 // Directories are skipped; a non-regular entry (symlink, device) whose base
 // name matches the executable disqualifies the archive — bytes are never
 // extracted through a link. Several qualifying members are an ambiguity
@@ -317,7 +318,7 @@ func scanZip(files []*zip.File, executable string) zipScan {
 		if info.Mode()&os.ModeType != 0 {
 			// Symlinks, devices, and other special members are never
 			// extracted; a matching one disqualifies the archive.
-			if base == executable {
+			if strings.EqualFold(base, executable) {
 				scan.disqualified = true
 			}
 
@@ -334,7 +335,7 @@ func scanZip(files []*zip.File, executable string) zipScan {
 			scan.onlyRegular = nil
 		}
 
-		if base == executable {
+		if strings.EqualFold(base, executable) {
 			scan.candidates = append(scan.candidates, zipCandidate{file: f, name: name})
 		}
 	}
@@ -485,7 +486,7 @@ func extractFromTar(r io.Reader, executable, dstPath string) error {
 		if hdr.Typeflag != tar.TypeReg {
 			// Symlinks, hardlinks, and special members are never extracted;
 			// a matching one disqualifies the archive.
-			if base == executable {
+			if strings.EqualFold(base, executable) {
 				return fmt.Errorf("%w: %q matches a non-regular archive member",
 					ErrExecutableNotFound, executable)
 			}
@@ -495,7 +496,7 @@ func extractFromTar(r io.Reader, executable, dstPath string) error {
 
 		regularCount++
 
-		if base == executable {
+		if strings.EqualFold(base, executable) {
 			matches = append(matches, hdr.Name)
 
 			if len(matches) > 1 {
