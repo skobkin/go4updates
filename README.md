@@ -377,10 +377,27 @@ if err != nil {
     return err
 }
 
-fmt.Printf("installed %s; previous binary kept at %s\n", applied.Version, applied.Backup)
+fmt.Printf("installed %s; restart to run it (previous binary kept at %s)\n",
+    applied.Version, applied.Backup)
+```
 
-// After restarting into the new version and confirming it is healthy
-// (initialization or a health check), retire the backup:
+`Apply` stops there: the new binary is installed under the target name, the
+previous one is retained at the backup path, and this process still runs the
+old version. Retiring the backup belongs to the **next startup** of the
+updated application — after its initialization or an application-defined
+health check has passed, never in the same run that applied the update:
+
+```go
+// On the next startup of the updated application:
+updater, err := selfupdate.New(selfupdate.WithAppName("example-app"))
+if err != nil {
+    return err
+}
+
+// The application's own initialization and health checks run first; a
+// startup that does not pass them exits without calling Cleanup, so the
+// backup survives for recovery.
+
 if err := updater.Cleanup(ctx); err != nil {
     return err
 }

@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"time"
@@ -61,10 +62,30 @@ func ExampleUpdater_Apply() {
 		log.Fatal(err)
 	}
 
-	log.Printf("installed %s; previous binary kept at %s", applied.Version, applied.Backup)
+	// The update is installed and the previous binary is kept at
+	// applied.Backup as the only rollback material. This run stops here:
+	// retiring the backup belongs to the next startup of the updated
+	// application, after it proved itself healthy.
+	log.Printf("installed %s; restart to run it (previous binary kept at %s)",
+		applied.Version, applied.Backup)
+}
 
-	// After restarting into the new version and confirming it is healthy
-	// (initialization or a health check), retire the backup:
+// ExampleUpdater_Cleanup shows the next startup of an updated application.
+// The backup of the previous version is retired only after the new version
+// initialized or passed an application-defined health check — reaching the
+// new binary proves it starts, not that it works.
+func ExampleUpdater_Cleanup() {
+	updater, err := selfupdate.New(selfupdate.WithAppName("example-app"))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// The application's own initialization and health checks run here; a
+	// startup that does not pass them exits without calling Cleanup, so
+	// the backup survives for recovery.
+	fmt.Println("initialization and health checks passed")
+
+	// The new version proved itself: retire the backup of the old one.
 	if err := updater.Cleanup(context.Background()); err != nil {
 		log.Printf("cleanup: %v", err)
 	}
