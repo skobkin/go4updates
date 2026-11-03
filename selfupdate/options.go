@@ -107,11 +107,13 @@ func WithTargetPath(path string) Option {
 // WithFileMode sets the permission bits applied to the installed
 // executable. Without it, a replaced target keeps the mode of the binary it
 // replaces, and a newly created target is installed with 0755. Only
-// permission bits are accepted.
+// non-zero permission bits are accepted: the zero mode would install a
+// non-executable target whose permissions every following install would
+// inherit.
 func WithFileMode(mode fs.FileMode) Option {
 	return func(o *options) error {
-		if mode&^fs.ModePerm != 0 {
-			return fmt.Errorf("file mode must be permission bits, got %v", mode)
+		if mode&^fs.ModePerm != 0 || mode.Perm() == 0 {
+			return fmt.Errorf("file mode must be non-zero permission bits, got %v", mode)
 		}
 
 		o.fileMode = mode

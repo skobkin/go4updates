@@ -149,6 +149,27 @@ func TestInstallWithFileMode(t *testing.T) {
 	})
 }
 
+// Regression: the zero mode slipped through validation, and the installed
+// binary ended up non-executable for everyone — with the mode also inherited
+// by every following install through the target-preservation default. The
+// option rejects it at construction instead.
+func TestWithFileModeRejectsZeroMode(t *testing.T) {
+	abs := filepath.Join(t.TempDir(), "app")
+
+	for _, mode := range []fs.FileMode{0, 0o000} {
+		_, err := NewInstaller(WithTargetPath(abs), WithFileMode(mode))
+		if err == nil {
+			t.Errorf("WithFileMode(%v) should be rejected: it installs a mode-0000 binary", mode)
+
+			continue
+		}
+
+		if !strings.Contains(err.Error(), "non-zero") {
+			t.Errorf("WithFileMode(%v) error = %v, want it to say non-zero", mode, err)
+		}
+	}
+}
+
 func TestInstallBackupIsHardlinkOfOldBinary(t *testing.T) {
 	dir := t.TempDir()
 
