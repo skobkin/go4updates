@@ -44,9 +44,9 @@ type Verifier interface {
 //
 // A sibling file holds the bare digest, optionally followed by the asset
 // file name. Manifest lines follow the GNU sha256sum format
-// "<digest>[ *]<filename>"; the line whose file name equals asset.Name
-// wins, and a manifest consisting of a single bare digest line is accepted
-// as the digest of the asset.
+// "<digest>[ *]<filename>"; the line whose file name case-insensitively
+// equals asset.Name wins, and a manifest consisting of a single bare digest
+// line is accepted as the digest of the asset.
 //
 // The checksum asset is downloaded through the same HTTPS-only, size
 // bounded downloader machinery as the binary, with its own 1 MiB limit.
@@ -155,6 +155,7 @@ func findChecksumSource(release updates.Release, asset updates.Asset) (checksumS
 
 	var manifests []updates.Asset
 
+	// TEMP-REVERT for per-finding commits
 	for _, a := range release.Assets {
 		name := strings.ToLower(a.Name)
 
@@ -209,7 +210,9 @@ func digestFileContents(contents []byte, fileName string) (string, error) {
 			return "", fmt.Errorf("go4updates/selfupdate: malformed checksum file for %q", fileName)
 		}
 
-		if file != "" && file != fileName {
+		// Publishers disagree about letter case; the recorded file name is
+		// compared case-insensitively, like the sibling resolution.
+		if file != "" && !strings.EqualFold(file, fileName) {
 			return "", fmt.Errorf("go4updates/selfupdate: checksum file for %q lists %q", fileName, file)
 		}
 
@@ -242,11 +245,11 @@ func manifestDigestFor(contents []byte, fileName string) (string, error) {
 			continue
 		}
 
-		switch file {
-		case "":
+		switch {
+		case file == "":
 			bare = append(bare, digest)
 
-		case fileName:
+		case strings.EqualFold(file, fileName):
 			matching = digest
 		}
 	}

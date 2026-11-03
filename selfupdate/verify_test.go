@@ -308,3 +308,34 @@ func TestChecksumVerifierIgnoresMaxAssetBytes(t *testing.T) {
 		t.Errorf("checksum bound = %d, want %d", v.downloader.maxBytes, maxChecksumBytes)
 	}
 }
+
+// Regression: the file name recorded inside a checksum file or manifest was
+// compared case-sensitively against the asset name, so a publisher writing a
+// differently-cased file name into the checksum failed verification although
+// the digest matched.
+func TestChecksumFileNameCaseInsensitive(t *testing.T) {
+	digest := digestOf("binary payload")
+
+	t.Run("sibling digest file", func(t *testing.T) {
+		f := newVerifyFixture(t, map[string]string{
+			"/" + assetName + ".sha256": digest + "  APP_1.0.0_LINUX_AMD64.tar.gz\n",
+		}, []updates.Asset{{Name: assetName}, {Name: assetName + ".sha256"}})
+
+		err := newVerifier(t, f).Verify(t.Context(), f.release, f.asset(), strings.NewReader("binary payload"))
+		if err != nil {
+			t.Fatalf("Verify: %v", err)
+		}
+	})
+
+	t.Run("manifest line", func(t *testing.T) {
+		f := newVerifyFixture(t, map[string]string{
+			"/checksums.txt": digestOf("other payload") + "  other_1.0.0_linux_amd64.tar.gz\n" +
+				strings.ToUpper(digest) + "  App_1.0.0_LINUX_amd64.tar.gz\n",
+		}, []updates.Asset{{Name: assetName}, {Name: "checksums.txt"}})
+
+		err := newVerifier(t, f).Verify(t.Context(), f.release, f.asset(), strings.NewReader("binary payload"))
+		if err != nil {
+			t.Fatalf("Verify: %v", err)
+		}
+	})
+}
