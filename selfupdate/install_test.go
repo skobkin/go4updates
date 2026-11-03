@@ -817,6 +817,262 @@ func TestInstallCancelAfterBackupReportsFailedRemoval(t *testing.T) {
 	}
 }
 
+// errInjectedReplace and errInjectedRestore are distinct sentinels so the
+// Windows-sequence tests can prove that every failure of a displaced-target
+// install stays individually identifiable with errors.Is.
+var (
+	errInjectedReplace = errors.New("injected: staged rename failed")
+	errInjectedRestore = errors.New("injected: backup restore failed")
+)
+
+// newWindowsSequenceInstaller forces the Windows two-rename replacement on
+// any platform, so the displaced-target restore paths are exercised by the
+// regular test run instead of only on native Windows runners.
+func newWindowsSequenceInstaller(t *testing.T, target string) *Installer {
+	t.Helper()
+
+	i := newTestInstaller(t, target)
+	i.windowsSequence = true
+
+	return i
+}
+
+// Regression: when the Windows replacement rename failed and the backup
+// restoration failed too, the returned error named only the restoration
+// failure — the original installation error was dropped, so callers could
+// neither log why the update failed nor classify it. All three signals are
+// preserved: ErrReplaced for the displaced target, the original failure,
+// and the restoration failure, each reachable with errors.Is.
+func TestInstallWindowsRestoreFailurePreservesEveryError(t *testing.T) {
+	dir := t.TempDir()
+
+	target := filepath.Join(dir, "app")
+	backup := target + BackupSuffix
+
+	writeTarget(t, target, "v1", 0o755)
+
+	i := newWindowsSequenceInstaller(t, target)
+
+	i.renameFn = func(oldname, newname string) error {
+		switch {
+		case oldname == target && newname == backup:
+			// Moving the old binary aside succeeds.
+			return os.Rename(oldname, newname)
+		case oldname == backup && newname == target:
+			// The restoration fails as well.
+			return errInjectedRestore
+		default:
+			// staged -> target fails.
+			return errInjectedReplace
+		}
+	}
+
+	backupPath, err := i.Install(t.Context(), stagedFile(t, dir, "v2"))
+	if err == nil {
+		t.Fatal("Install should fail on the injected rename failures")
+	}
+
+	if !errors.Is(err, ErrReplaced) {
+		t.Errorf("err = %v, want ErrReplaced for the displaced target", err)
+	}
+
+	if !errors.Is(err, errInjectedReplace) {
+		t.Errorf("err = %v, want the original installation failure in the chain", err)
+	}
+
+	if !errors.Is(err, errInjectedRestore) {
+		t.Errorf("err = %v, want the restoration failure in the chain", err)
+	}
+
+	if backupPath != backup {
+		t.Errorf("backup path = %q, want %q so the caller can recover", backupPath, backup)
+	}
+
+	// Displaced state: the target is missing, the backup holds the old
+	// binary.
+	if _, statErr := os.Lstat(target); !errors.Is(statErr, fs.ErrNotExist) {
+		t.Errorf("target stat = %v, want the displaced (missing) target", statErr)
+	}
+
+	if got := readFileForTest(t, backup); got != "v1" {
+		t.Errorf("backup content = %q, want the preserved v1", got)
+	}
+
+	// The documented recovery must work from the reported state.
+	i.renameFn = os.Rename
+
+	if err := i.Cleanup(t.Context()); err != nil {
+		t.Fatalf("Cleanup after the displaced state: %v", err)
+	}
+
+	if got := readFileForTest(t, target); got != "v1" {
+		t.Errorf("target content after recovery = %q, want restored v1", got)
+	}
+}
+
+// deadlineContext wraps a parent context and starts reporting
+// context.DeadlineExceeded when expire is called: a deterministic stand-in
+// for a deadline lapsing in the middle of the replacement sequence, where
+// Install's entry check must still see a live context. (Canceling a live
+// deadline context would report context.Canceled, not the deadline error.)
+type deadlineContext struct {
+	context.Context
+
+	mu      sync.Mutex
+	expired bool
+}
+
+// expire makes the context report context.DeadlineExceeded from now on.
+func (c *deadlineContext) expire() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.expired = true
+}
+
+// Err implements context.Context.
+func (c *deadlineContext) Err() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.expired {
+		return context.DeadlineExceeded
+	}
+
+	return c.Context.Err()
+}
+
+// Regression: the Windows cancellation path — the sequence notices the
+// lapsed context right after moving the old binary aside — dropped the
+// original context error when the restoration failed, so callers could not
+// tell a canceled update from a failed one. The context error stays in the
+// chain next to ErrReplaced and the restoration failure.
+func TestInstallWindowsCanceledRestorePreservesContextError(t *testing.T) {
+	cases := []struct {
+		name    string
+		want    error
+		wrapCtx func(t *testing.T) (context.Context, func())
+	}{
+		{
+			name: "canceled",
+			want: context.Canceled,
+			wrapCtx: func(t *testing.T) (context.Context, func()) {
+				ctx, cancel := context.WithCancel(t.Context())
+
+				return ctx, cancel
+			},
+		},
+		{
+			name: "deadline exceeded",
+			want: context.DeadlineExceeded,
+			wrapCtx: func(t *testing.T) (context.Context, func()) {
+				dc := &deadlineContext{Context: t.Context()}
+
+				return dc, dc.expire
+			},
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+
+			target := filepath.Join(dir, "app")
+			backup := target + BackupSuffix
+
+			writeTarget(t, target, "v1", 0o755)
+
+			i := newWindowsSequenceInstaller(t, target)
+
+			ctx, trigger := tt.wrapCtx(t)
+
+			// The sequence's cancellation checkpoint sits right after the
+			// move-aside rename, so the context lapses from within that
+			// rename: the entry check of Install must not fire first.
+			i.renameFn = func(oldname, newname string) error {
+				if oldname == target && newname == backup {
+					trigger()
+
+					return os.Rename(oldname, newname)
+				}
+
+				if oldname == backup && newname == target {
+					return errInjectedRestore
+				}
+
+				return os.Rename(oldname, newname)
+			}
+
+			backupPath, err := i.Install(ctx, stagedFile(t, dir, "v2"))
+
+			trigger()
+
+			if err == nil {
+				t.Fatal("Install should fail on the triggered context with a failing restoration")
+			}
+
+			if !errors.Is(err, tt.want) {
+				t.Errorf("err = %v, want the original %v in the chain", err, tt.want)
+			}
+
+			if !errors.Is(err, ErrReplaced) {
+				t.Errorf("err = %v, want ErrReplaced for the displaced target", err)
+			}
+
+			if !errors.Is(err, errInjectedRestore) {
+				t.Errorf("err = %v, want the restoration failure in the chain", err)
+			}
+
+			if backupPath != backup {
+				t.Errorf("backup path = %q, want %q so the caller can recover", backupPath, backup)
+			}
+
+			if _, statErr := os.Lstat(target); !errors.Is(statErr, fs.ErrNotExist) {
+				t.Errorf("target stat = %v, want the displaced (missing) target", statErr)
+			}
+		})
+	}
+
+	t.Run("original restored keeps reporting the cancellation", func(t *testing.T) {
+		dir := t.TempDir()
+
+		target := filepath.Join(dir, "app")
+		backup := target + BackupSuffix
+
+		writeTarget(t, target, "v1", 0o755)
+
+		i := newWindowsSequenceInstaller(t, target)
+
+		ctx, cancel := context.WithCancel(t.Context())
+
+		i.renameFn = func(oldname, newname string) error {
+			if oldname == target && newname == backup {
+				cancel()
+
+				return os.Rename(oldname, newname)
+			}
+
+			return os.Rename(oldname, newname)
+		}
+
+		_, err := i.Install(ctx, stagedFile(t, dir, "v2"))
+
+		cancel()
+
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v, want context.Canceled", err)
+		}
+
+		if got := readFileForTest(t, target); got != "v1" {
+			t.Errorf("target content = %q, want the restored v1", got)
+		}
+
+		if _, statErr := os.Lstat(backup); !errors.Is(statErr, fs.ErrNotExist) {
+			t.Errorf("backup stat = %v, want the backup consumed by the restore", statErr)
+		}
+	})
+}
+
 // Regression: the pre-publication re-check of the backup path only rejected
 // an existing backup; a path that could not be inspected at all fell through
 // to the publishing rename, which would have replaced whatever sits there —

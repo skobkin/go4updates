@@ -56,6 +56,12 @@ type Installer struct {
 	fileMode    fs.FileMode
 	fileModeSet bool
 
+	// windowsSequence selects the Windows two-rename replacement in
+	// Install. Production wires it from runtime.GOOS; it is a field so the
+	// displaced-target restore paths stay regression-testable on every
+	// platform instead of only on native Windows runners.
+	windowsSequence bool
+
 	mu sync.Mutex
 
 	// The following fields are seams for fault-injection tests; production
@@ -89,9 +95,10 @@ func NewInstaller(opts ...Option) (*Installer, error) {
 	}
 
 	return &Installer{
-		targetPath:  target,
-		fileMode:    o.fileMode,
-		fileModeSet: o.fileModeSet,
+		targetPath:      target,
+		fileMode:        o.fileMode,
+		fileModeSet:     o.fileModeSet,
+		windowsSequence: runtime.GOOS == "windows",
 
 		linkFn:    os.Link,
 		copyFn:    copyFileTo,
@@ -155,7 +162,10 @@ func resolveSymlinks(target string) string {
 // work only), or — the Windows restore-failure paths — the target was
 // moved aside and could not be restored, so the target path is missing
 // and the returned backup path holds the old executable; in both shapes
-// [Installer.Cleanup] recovers a consistent state before a retry. A
+// [Installer.Cleanup] recovers a consistent state before a retry. On the
+// restore-failure paths the original installation failure (for example
+// the context cancellation) and the restoration failure are joined, not
+// replaced, so errors.Is identifies each of the three. A
 // backup created by this failed attempt is removed again so a retry is
 // not blocked by [ErrBackupExists]; a pre-existing backup is never
 // created, written, or removed by Install.
@@ -170,7 +180,7 @@ func (i *Installer) Install(ctx context.Context, stagedPath string) (backupPath 
 	target := i.targetPath
 	backup := target + BackupSuffix
 
-	if runtime.GOOS == "windows" {
+	if i.windowsSequence {
 		return i.installWindows(ctx, stagedPath, target, backup)
 	}
 
@@ -316,9 +326,13 @@ func (i *Installer) installWindows(ctx context.Context, stagedPath, target, back
 			// The target is missing and could not be restored, so the
 			// "target untouched" contract cannot be honored: report the
 			// displaced state through [ErrReplaced] and return the backup
-			// path so the caller can recover.
-			return backup, fmt.Errorf("%w: install canceled; restoring %s also failed: %w; recover manually: move %s %s",
-				ErrReplaced, backup, rerr, backup, target)
+			// path so the caller can recover. The context error and the
+			// restoration failure are joined, so errors.Is identifies
+			// both — the original failure is not lost behind the restore.
+			return backup, fmt.Errorf("%w: install canceled: %w; recover manually: move %s %s",
+				ErrReplaced,
+				errors.Join(err, fmt.Errorf("restoring %s: %w", backup, rerr)),
+				backup, target)
 		}
 
 		return "", fmt.Errorf("go4updates/selfupdate: install canceled: %w (original restored)", err)
@@ -327,9 +341,13 @@ func (i *Installer) installWindows(ctx context.Context, stagedPath, target, back
 	if err := i.renameFn(stagedPath, target); err != nil {
 		if rerr := i.renameFn(backup, target); rerr != nil {
 			// Displaced target, same as above: the old binary lives only
-			// under the backup name.
-			return backup, fmt.Errorf("%w: replacing %s failed; restoring %s also failed: %w; recover manually: move %s %s",
-				ErrReplaced, target, backup, rerr, backup, target)
+			// under the backup name. The replacement failure and the
+			// restoration failure are joined, so errors.Is identifies
+			// both.
+			return backup, fmt.Errorf("%w: replacing %s: %w; recover manually: move %s %s",
+				ErrReplaced, target,
+				errors.Join(err, fmt.Errorf("restoring %s: %w", backup, rerr)),
+				backup, target)
 		}
 
 		return "", fmt.Errorf("go4updates/selfupdate: replacing %s: %w (original restored)", target, err)

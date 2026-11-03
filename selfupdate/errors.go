@@ -72,8 +72,11 @@ var (
 	// directory sync failure), or — the Windows restore-failure paths — the
 	// target was moved aside and could not be restored, so the target path
 	// is missing and the returned backup path holds the old executable.
-	// When errors.Is finds it, the target is not necessarily the old
-	// binary: run [Installer.Cleanup] to recover a consistent state before
-	// retrying. Otherwise a failed install left the target untouched.
+	// On the restore-failure paths the original installation failure and
+	// the restoration failure are joined into the chain, so errors.Is can
+	// identify all three. When errors.Is finds ErrReplaced, the target is
+	// not necessarily the old binary: run [Installer.Cleanup] to recover a
+	// consistent state before retrying. Otherwise a failed install left
+	// the target untouched.
 	ErrReplaced = errors.New("go4updates/selfupdate: executable was replaced before the failure")
 )
