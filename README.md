@@ -436,7 +436,9 @@ verification, not transport.
 **Transfers are bounded while streaming.** Downloads
 (`DefaultMaxAssetBytes`, `WithMaxAssetBytes`) and decompression
 (`DefaultMaxExtractedBytes`, `WithMaxExtractedBytes`) abort early on oversized
-or lying payloads instead of filling memory or disk.
+or lying payloads instead of filling memory or disk. The extraction bound
+covers tar-family archives as a whole (the stream must be read through) and
+zip archives in the selected member only.
 
 **Replacement differs by platform.**
 

@@ -189,8 +189,11 @@ func WithInsecureSkipVerify() Option {
 
 // WithMaxExtractedBytes sets the hard size limit enforced while streaming
 // decompressed archive data, so a decompression bomb is aborted early
-// instead of filling the disk. Non-positive values are rejected; when the
-// option is not used, [DefaultMaxExtractedBytes] applies.
+// instead of filling the disk. What the limit covers is format-dependent:
+// tar-family archives are bounded as a whole (the stream must be read
+// through), zip archives only in the selected member. Non-positive values
+// are rejected; when the option is not used, [DefaultMaxExtractedBytes]
+// applies.
 func WithMaxExtractedBytes(n int64) Option {
 	return func(o *options) error {
 		if n <= 0 {

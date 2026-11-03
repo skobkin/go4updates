@@ -146,7 +146,9 @@ func zip64DeclaredEntryCount(f *os.File, locatorOff []byte) (int64, bool) {
 // DefaultMaxExtractedBytes bounds the size of the extracted executable when
 // no limit is configured with [WithMaxExtractedBytes]. It is enforced while
 // streaming decompressed data, so a decompression bomb is aborted early
-// instead of filling the disk.
+// instead of filling the disk. What the limit covers is format-dependent:
+// tar streams bound the whole decompressed archive, zip bounds the selected
+// member.
 const DefaultMaxExtractedBytes int64 = 512 << 20 // 512 MiB
 
 // extractBinary locates the executable inside the downloaded asset at
@@ -169,7 +171,11 @@ const DefaultMaxExtractedBytes int64 = 512 << 20 // 512 MiB
 // contains exactly one regular file, that file wins.
 //
 // The extracted byte count is bounded by maxExtracted, enforced while
-// streaming decompressed data.
+// streaming decompressed data. What the bound covers is format-dependent by
+// nature: a tar stream is sequential and must be read through to its end,
+// so the whole decompressed archive counts against the limit, while zip is
+// randomly accessible and only the selected member's decompressed bytes
+// count.
 func extractBinary(archivePath, assetName, appName, goos, dstPath string, maxExtracted int64) error {
 	kind, err := classifyAssetName(assetName)
 	if err != nil {
