@@ -5,8 +5,9 @@ import "time"
 // DefaultReleaseLimit is used when FetchOptions.Limit is zero.
 const DefaultReleaseLimit = 10
 
-// Asset describes a single file attached to a release. Assets are
-// metadata-only: the library never downloads them.
+// Asset describes a single file attached to a release. The updates package
+// treats assets as metadata only and never downloads them; downloading,
+// verification, and installation are opt-in through the selfupdate package.
 type Asset struct {
 	// Name is the file name as published by the provider.
 	Name string
@@ -48,7 +49,8 @@ type Release struct {
 	// pre-release.
 	Prerelease bool
 
-	// Assets lists attached release files. Metadata only.
+	// Assets lists attached release files as metadata; the selfupdate
+	// package downloads them on demand.
 	Assets []Asset
 }
 
