@@ -153,24 +153,46 @@ func findChecksumSource(release updates.Release, asset updates.Asset) (checksumS
 	lower := strings.ToLower(asset.Name)
 	siblings := []string{lower + ".sha256", lower + ".sha256sum"}
 
-	var manifests []updates.Asset
+	var (
+		sha256Asset, sha256sumAsset updates.Asset
 
-	// TEMP-REVERT for per-finding commits
+		foundSha256, foundSha256sum bool
+
+		manifests []updates.Asset
+	)
+
+	// One pass over the assets; the sibling choice happens afterwards so
+	// the documented precedence ("<asset>.sha256", then
+	// "<asset>.sha256sum") holds regardless of the release asset order.
 	for _, a := range release.Assets {
 		name := strings.ToLower(a.Name)
 
-		if name == siblings[0] {
-			return checksumSource{asset: a}, nil
-		}
+		switch name {
+		case siblings[0]:
+			if !foundSha256 {
+				foundSha256 = true
+				sha256Asset = a
+			}
 
-		if name == siblings[1] {
-			return checksumSource{asset: a}, nil
+		case siblings[1]:
+			if !foundSha256sum {
+				foundSha256sum = true
+				sha256sumAsset = a
+			}
 		}
 
 		if (strings.Contains(name, "checksums") || strings.Contains(name, "sha256sums")) &&
 			!isManifestSidecar(name) {
 			manifests = append(manifests, a)
 		}
+	}
+
+	if foundSha256 {
+		return checksumSource{asset: sha256Asset}, nil
+	}
+
+	if foundSha256sum {
+		return checksumSource{asset: sha256sumAsset}, nil
 	}
 
 	switch len(manifests) {

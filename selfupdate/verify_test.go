@@ -339,3 +339,28 @@ func TestChecksumFileNameCaseInsensitive(t *testing.T) {
 		}
 	})
 }
+
+// Regression: when both sibling names were published, the resolution
+// returned whichever came first in the release asset list; the documented
+// precedence is "<asset>.sha256" first, "<asset>.sha256sum" second.
+func TestFindChecksumSourceSiblingPrecedence(t *testing.T) {
+	asset := updates.Asset{Name: assetName}
+
+	release := updates.Release{Assets: []updates.Asset{
+		{Name: assetName + ".sha256sum"},
+		{Name: assetName + ".sha256"},
+	}}
+
+	source, err := findChecksumSource(release, asset)
+	if err != nil {
+		t.Fatalf("findChecksumSource: %v", err)
+	}
+
+	if source.manifest {
+		t.Error("the sibling was resolved as a manifest")
+	}
+
+	if want := assetName + ".sha256"; source.asset.Name != want {
+		t.Errorf("selected %q, want %q per the documented precedence", source.asset.Name, want)
+	}
+}
