@@ -66,8 +66,8 @@ func WithAllowHTTP() Option {
 // WithMaxAssetBytes sets the hard size limit for a single asset download.
 // The limit is enforced through the declared Content-Length before the
 // transfer and while streaming the body, including when the server lies or
-// omits Content-Length. Zero selects [DefaultMaxAssetBytes]; non-positive
-// values are rejected.
+// omits Content-Length. Non-positive values are rejected; when the option
+// is not used, [DefaultMaxAssetBytes] applies.
 func WithMaxAssetBytes(n int64) Option {
 	return func(o *options) error {
 		if n <= 0 {
@@ -122,8 +122,9 @@ func WithFileMode(mode fs.FileMode) Option {
 }
 
 // WithAppName sets the application name used for asset matching and for
-// locating the executable inside archives. Zero selects the target file
-// name without its ".exe" suffix.
+// locating the executable inside archives. When the option is not used, the
+// target file name without its ".exe" suffix is used; an empty name is
+// rejected.
 func WithAppName(name string) Option {
 	return func(o *options) error {
 		if name == "" {
@@ -184,8 +185,8 @@ func WithInsecureSkipVerify() Option {
 
 // WithMaxExtractedBytes sets the hard size limit enforced while streaming
 // decompressed archive data, so a decompression bomb is aborted early
-// instead of filling the disk. Zero selects [DefaultMaxExtractedBytes];
-// non-positive values are rejected.
+// instead of filling the disk. Non-positive values are rejected; when the
+// option is not used, [DefaultMaxExtractedBytes] applies.
 func WithMaxExtractedBytes(n int64) Option {
 	return func(o *options) error {
 		if n <= 0 {
