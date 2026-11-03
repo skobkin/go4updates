@@ -240,8 +240,12 @@ func MatchAssetName(name, appName, goos, goarch string) bool {
 		}
 
 		// Pre-release suffixes such as "1.2.3-rc1" are split the same way;
-		// retry joined with the previous version token.
-		if i > 0 {
+		// retry joined with the previous version token. The suffix must be
+		// plausible as a version label: the joined check alone never
+		// validates the appended tail, so any token ("musl", "flavor")
+		// would be swallowed and the conservative match would silently
+		// accept names outside the convention.
+		if i > 0 && versionSuffixish(tok) {
 			for _, sep := range []string{"-", "_"} {
 				if versionish(tokens[i-1] + sep + tok) {
 					tok = "" // consumed as part of the version label
@@ -286,6 +290,46 @@ func versionish(token string) bool {
 	}
 
 	return true
+}
+
+// versionChannelLabels are release-channel words accepted as version-label
+// suffixes without a digit: a channel like "nightly" carries no build
+// number, while "rc1" or "beta2" carry one and pass the digit rule.
+var versionChannelLabels = []string{
+	"alpha", "beta", "rc", "pre", "dev", "snapshot", "nightly", "canary", "debug",
+}
+
+// versionSuffixish reports whether tok is a plausible pre-release or build
+// label following a version token: it must consist of version-identifier
+// characters and carry distinguishing information — either a digit
+// ("rc1", "beta2", "20240101") or a known release-channel word. Flavor
+// tokens such as "musl" carry neither and are rejected, keeping the match
+// conservative.
+func versionSuffixish(tok string) bool {
+	if tok == "" {
+		return false
+	}
+
+	hasDigit := false
+
+	for _, r := range tok {
+		switch {
+		case r >= '0' && r <= '9':
+			hasDigit = true
+
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r == '.', r == '-':
+			// Part of a version identifier.
+
+		default:
+			return false
+		}
+	}
+
+	if hasDigit {
+		return true
+	}
+
+	return slices.Contains(versionChannelLabels, strings.ToLower(tok))
 }
 
 // DefaultAssetMatcher returns the standard [AssetMatcher] for appName on

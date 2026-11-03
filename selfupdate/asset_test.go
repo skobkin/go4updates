@@ -80,6 +80,16 @@ func TestMatchAssetName(t *testing.T) {
 		// Unknown tokens make the scheme non-conventional.
 		{name: "unknown extra token", asset: "app_1.2.3_linux_musl_amd64.tar.gz", app: "app", goos: "linux", goarch: "amd64", wantMatch: false},
 
+		// A token following a version is only tolerated when it is itself a
+		// version label: the former backward join swallowed any token
+		// ("musl", "flavor"), accepting names the conservative match must
+		// reject — and colliding glibc/musl builds then matched ambiguous.
+		{name: "flavor token after version", asset: "app_1.2.3_musl_linux_amd64.tar.gz", app: "app", goos: "linux", goarch: "amd64", wantMatch: false},
+		{name: "flavor token after version, dash style", asset: "app-1.2.3-musl-linux-amd64.tar.gz", app: "app", goos: "linux", goarch: "amd64", wantMatch: false},
+		{name: "channel label after version", asset: "app_1.2.3_nightly_linux_amd64.tar.gz", app: "app", goos: "linux", goarch: "amd64", wantMatch: true},
+		{name: "digit prerelease after version", asset: "app_1.2.3_beta2_linux_amd64.tar.gz", app: "app", goos: "linux", goarch: "amd64", wantMatch: true},
+		{name: "dotted prerelease after version", asset: "app_1.2.3_alpha.1_linux_amd64.tar.gz", app: "app", goos: "linux", goarch: "amd64", wantMatch: true},
+
 		// Unmapped platforms.
 		{name: "unknown goos", asset: "app_1.2.3_plan9_amd64.tar.gz", app: "app", goos: "plan9", goarch: "amd64", wantMatch: false},
 		{name: "unknown goarch", asset: "app_1.2.3_linux_riscv64.tar.gz", app: "app", goos: "linux", goarch: "riscv64", wantMatch: false},
@@ -122,6 +132,30 @@ func TestVersionish(t *testing.T) {
 	for _, tt := range tests {
 		if got := versionish(tt.token); got != tt.want {
 			t.Errorf("versionish(%q) = %v, want %v", tt.token, got, tt.want)
+		}
+	}
+}
+
+func TestVersionSuffixish(t *testing.T) {
+	tests := []struct {
+		token string
+		want  bool
+	}{
+		{"rc1", true},
+		{"beta2", true},
+		{"alpha.1", true},
+		{"20240101", true},
+		{"nightly", true},
+		{"dev", true},
+		{"", false},
+		{"musl", false},
+		{"flavor", false},
+		{"linux", false},
+	}
+
+	for _, tt := range tests {
+		if got := versionSuffixish(tt.token); got != tt.want {
+			t.Errorf("versionSuffixish(%q) = %v, want %v", tt.token, got, tt.want)
 		}
 	}
 }
