@@ -505,7 +505,10 @@ Rules worth knowing:
 - Installs through one installer are serialized, and backup publication is
   no-clobber where the filesystem provides atomic hardlinks — but
   cross-process updates of one target are unsupported; the checks are not
-  a locking system.
+  a locking system. On one `Updater`, `Apply` and `Cleanup` are serialized
+  against each other for the whole call — a cleanup waits (or fails on its
+  canceled context) while an update runs, so it never removes the running
+  update's staging files.
 - `Cleanup` restores the backup automatically when the target is missing (the
   Windows crash window). This needs the original target path: when the
   application is launched from the backup executable itself,

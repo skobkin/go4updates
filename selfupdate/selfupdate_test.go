@@ -619,3 +619,141 @@ func TestSelectAssetPreview(t *testing.T) {
 		t.Errorf("selected %q, want the zip asset", asset.Name)
 	}
 }
+
+// blockedReleaseFixture builds an Updater whose single HTTP request — the
+// asset download; no checksum is published — blocks mid-transfer until the
+// test closes the release channel. While blocked, Apply is demonstrably
+// mid-pipeline with a download temp file on disk.
+func blockedReleaseFixture(t *testing.T) (*Updater, string, string, chan struct{}, chan struct{}, updates.Result) {
+	t.Helper()
+
+	dir := t.TempDir()
+
+	target := filepath.Join(dir, fixtureAppName)
+
+	if err := os.WriteFile(target, []byte(oldPayload), 0o755); err != nil {
+		t.Fatalf("writing target: %v", err)
+	}
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+
+		<-release
+
+		_, _ = fmt.Fprint(w, newPayload)
+	}))
+	t.Cleanup(srv.Close)
+
+	assetName := fixtureAppName + "_2.0.0_" + runtime.GOOS + "_" + runtime.GOARCH
+
+	releasable := updates.Release{
+		Version: "v2.0.0",
+		Assets:  []updates.Asset{{Name: assetName, URL: srv.URL + "/payload"}},
+	}
+
+	u, err := New(
+		WithTargetPath(target),
+		WithAppName(fixtureAppName),
+		WithHTTPClient(srv.Client()),
+		WithInsecureSkipVerify(),
+	)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	return u, dir, target, started, release, updates.Result{
+		Latest: &releasable,
+		Status: updates.StatusUpdateAvailable,
+	}
+}
+
+// Regression: the Installer mutex covered only the final install step, so
+// the download and staging files an Apply created before reaching it were
+// fair game for a Cleanup running on the same Updater: cleanup swept them
+// by prefix mid-download and the update failed with an OS file error. The
+// Updater now serializes its whole pipeline — Cleanup waits while Apply
+// runs, and the update completes untouched.
+func TestApplyConcurrentCleanupCannotInterfere(t *testing.T) {
+	u, dir, target, started, release, result := blockedReleaseFixture(t)
+
+	applyDone := make(chan error, 1)
+
+	go func() {
+		_, err := u.Apply(t.Context(), result)
+		applyDone <- err
+	}()
+
+	<-started
+
+	cleanupDone := make(chan error, 1)
+
+	go func() {
+		cleanupDone <- u.Cleanup(t.Context())
+	}()
+
+	// Finish the blocked download. Cleanup must have been waiting for the
+	// pipeline instead of sweeping its files.
+	close(release)
+
+	if err := <-applyDone; err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	if err := <-cleanupDone; err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+
+	if got := readFileForTest(t, target); got != newPayload {
+		t.Errorf("installed content = %q, want %q", got, newPayload)
+	}
+
+	// Cleanup ran to completion after the pipeline: the retired backup is
+	// its observable effect.
+	if _, statErr := os.Lstat(target + BackupSuffix); !errors.Is(statErr, fs.ErrNotExist) {
+		t.Errorf("backup stat = %v, want retired by the waiting Cleanup", statErr)
+	}
+
+	assertNoStagingLeftovers(t, dir, fixtureAppName)
+}
+
+// A Cleanup whose context is canceled while an Apply holds the lifecycle
+// lock must fail with that cancellation instead of queueing — and must
+// leave the running update alone.
+func TestApplyCleanupCanceledWhileWaiting(t *testing.T) {
+	u, dir, target, started, release, result := blockedReleaseFixture(t)
+
+	applyDone := make(chan error, 1)
+
+	go func() {
+		_, err := u.Apply(t.Context(), result)
+		applyDone <- err
+	}()
+
+	<-started
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	err := u.Cleanup(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("Cleanup err = %v, want context.Canceled while Apply holds the lock", err)
+	}
+
+	close(release)
+
+	if err := <-applyDone; err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	if got := readFileForTest(t, target); got != newPayload {
+		t.Errorf("installed content = %q, want %q", got, newPayload)
+	}
+
+	assertNoStagingLeftovers(t, dir, fixtureAppName)
+}

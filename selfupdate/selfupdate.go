@@ -35,8 +35,14 @@ type Applied struct {
 // the decision that an update exists belongs to the checker, the watcher,
 // and the application. The library never calls Apply or Cleanup on its own.
 //
-// An Updater is immutable after construction and safe for concurrent use;
-// it starts no background work.
+// An Updater is safe for concurrent use and starts no background work.
+// Apply and Cleanup on one Updater are serialized against each other for
+// the whole life of the call: a Cleanup waits while an Apply runs — or
+// fails with its context's cancellation error if the wait is canceled — so
+// it never removes the download or staging files of an in-progress update,
+// and concurrent Apply calls run one at a time. SelectAsset touches no
+// files and stays freely callable. The Updater's [Installer] keeps its own
+// locking for direct Installer consumers.
 //
 // The pipeline steps are also available as composable pieces: [Downloader]
 // streams any release asset to an arbitrary [io.Writer], [Verifier]
@@ -51,6 +57,12 @@ type Updater struct {
 	force      bool
 
 	maxExtracted int64
+
+	// lifecycle is a one-slot semaphore held for the whole of an Apply
+	// pipeline or a Cleanup sweep: Cleanup must never sweep the download
+	// and staging files an in-progress Apply is still writing. The
+	// Installer keeps its own mutex for direct Installer consumers.
+	lifecycle chan struct{}
 }
 
 // New creates an Updater from opts, resolving defaults for anything unset:
@@ -137,6 +149,7 @@ func New(opts ...Option) (*Updater, error) {
 		appName:      appName,
 		force:        o.force,
 		maxExtracted: maxExtracted,
+		lifecycle:    make(chan struct{}, 1),
 	}, nil
 }
 
@@ -145,6 +158,28 @@ func New(opts ...Option) (*Updater, error) {
 // the user before calling Apply.
 func (u *Updater) SelectAsset(release updates.Release) (updates.Asset, error) {
 	return selectAsset(release.Assets, u.matcher)
+}
+
+// acquireLifecycle takes the Updater-wide lifecycle lock, returning a
+// release function. Apply holds it for the whole pipeline and Cleanup for
+// its sweep, so a concurrent Cleanup can never remove the download or
+// staging files an in-progress Apply is still writing. A context canceled
+// while another Apply or Cleanup holds the lock fails the wait; a lock
+// acquired instantly proceeds even on an already-canceled context, so the
+// pipeline's own checks produce their usual, more specific errors.
+func (u *Updater) acquireLifecycle(ctx context.Context) (func(), error) {
+	select {
+	case u.lifecycle <- struct{}{}:
+		return func() { <-u.lifecycle }, nil
+	default:
+	}
+
+	select {
+	case u.lifecycle <- struct{}{}:
+		return func() { <-u.lifecycle }, nil
+	case <-ctx.Done():
+		return nil, fmt.Errorf("go4updates/selfupdate: another Apply or Cleanup on this Updater is still running: %w", ctx.Err())
+	}
 }
 
 // Apply installs the release described by result:
@@ -168,7 +203,19 @@ func (u *Updater) SelectAsset(release updates.Release) (updates.Asset, error) {
 // failure path; on success the previous binary remains under Applied.Backup
 // until the application calls [Updater.Cleanup] — after initialization or a
 // health check, never before.
+//
+// The call holds the Updater-wide lifecycle lock for the whole pipeline
+// (see [Updater]): a context canceled while another Apply or Cleanup on
+// the same Updater holds the lock fails the call without touching
+// anything.
 func (u *Updater) Apply(ctx context.Context, result updates.Result) (Applied, error) {
+	release, err := u.acquireLifecycle(ctx)
+	if err != nil {
+		return Applied{}, err
+	}
+
+	defer release()
+
 	if result.Latest == nil {
 		return Applied{}, ErrNoRelease
 	}
@@ -290,6 +337,18 @@ func (u *Updater) Apply(ctx context.Context, result updates.Result) (Applied, er
 // binary proves it starts, not that it is healthy — and never before: until
 // then the backup is the only rollback material. Cleanup is an artifact
 // collector and interrupted-update recovery tool, not a rollback mechanism.
+//
+// Cleanup holds the Updater-wide lifecycle lock while it runs (see
+// [Updater]): it waits for an in-progress Apply on the same Updater — its
+// context may cancel the wait — so it never sweeps that update's download
+// or staging files.
 func (u *Updater) Cleanup(ctx context.Context) error {
+	release, err := u.acquireLifecycle(ctx)
+	if err != nil {
+		return err
+	}
+
+	defer release()
+
 	return u.installer.Cleanup(ctx)
 }
