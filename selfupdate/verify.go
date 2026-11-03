@@ -37,8 +37,10 @@ type Verifier interface {
 //  1. an asset named "<asset>.sha256";
 //  2. an asset named "<asset>.sha256sum";
 //  3. a checksum manifest whose lowercased name contains "checksums" or
-//     "sha256sums" (for example "checksums.txt" or "SHA256SUMS"). Several
-//     such manifests are ambiguous and fail.
+//     "sha256sums" (for example "checksums.txt" or "SHA256SUMS").
+//     Signature sidecars of the manifest itself ("checksums.txt.sig",
+//     "checksums.txt.asc", ".minisig", ".gpg", ".bundle", ".sigstore")
+//     do not count as manifests. Several manifests are ambiguous and fail.
 //
 // A sibling file holds the bare digest, optionally followed by the asset
 // file name. Manifest lines follow the GNU sha256sum format
@@ -123,6 +125,27 @@ type checksumSource struct {
 	manifest bool
 }
 
+// manifestSidecarExts lists file-name extensions of signature and
+// attestation sidecars that belong to a checksum manifest itself
+// ("checksums.txt.sig", "checksums.txt.asc", cosign bundles, sigstore
+// attestations). Their names contain "checksums" or "sha256sums" too, but
+// they are not additional manifests.
+var manifestSidecarExts = []string{
+	".sig", ".asc", ".minisig", ".gpg", ".bundle", ".sigstore", ".sigstore.json",
+}
+
+// isManifestSidecar reports whether a lowercased asset name is a signature
+// sidecar of a checksum manifest rather than a manifest itself.
+func isManifestSidecar(lower string) bool {
+	for _, ext := range manifestSidecarExts {
+		if strings.HasSuffix(lower, ext) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // findChecksumSource resolves the checksum asset for asset among
 // release.Assets: exact "<name>.sha256" / "<name>.sha256sum" siblings
 // first, then a single checksum manifest.
@@ -143,7 +166,8 @@ func findChecksumSource(release updates.Release, asset updates.Asset) (checksumS
 			return checksumSource{asset: a}, nil
 		}
 
-		if strings.Contains(name, "checksums") || strings.Contains(name, "sha256sums") {
+		if (strings.Contains(name, "checksums") || strings.Contains(name, "sha256sums")) &&
+			!isManifestSidecar(name) {
 			manifests = append(manifests, a)
 		}
 	}

@@ -168,6 +168,20 @@ func TestChecksumVerifierSources(t *testing.T) {
 			wantErr: ErrNoChecksum,
 		},
 		{
+			name:  "signature sidecars of the manifest are not manifests",
+			files: map[string]string{"/checksums.txt": digest + "  " + assetName},
+			assets: []string{
+				assetName,
+				"checksums.txt",
+				"checksums.txt.sig",
+				"checksums.txt.asc",
+				"checksums.txt.minisig",
+				"checksums.txt.gpg",
+				"checksums.txt.bundle",
+				"checksums.txt.sigstore.json",
+			},
+		},
+		{
 			name:    "several manifests are ambiguous",
 			files:   map[string]string{"/checksums.txt": digest + "  " + assetName, "/SHA256SUMS": digest + "  " + assetName},
 			assets:  []string{assetName, "checksums.txt", "SHA256SUMS"},
