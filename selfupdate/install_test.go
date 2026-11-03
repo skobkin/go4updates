@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -743,6 +744,54 @@ func TestCleanupBestEffortWithUnremovableFiles(t *testing.T) {
 
 	if !strings.Contains(err.Error(), ".go4updates.download1") {
 		t.Errorf("error should name the blocked staging artifact, got: %v", err)
+	}
+}
+
+// Regression: Apply and the backup copy fallback create staging artifacts
+// with a sanitized base name (os.CreateTemp pattern), but Cleanup matched
+// against the raw base name, so a target whose name contains '*' never had
+// its staging litter collected.
+func TestCleanupMatchesSanitizedStagingNames(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("* is not legal in Windows file names; the sanitization mismatch is Unix-only")
+	}
+
+	dir := t.TempDir()
+
+	target := filepath.Join(dir, "my*app")
+
+	writeTarget(t, target, "v2", 0o755)
+
+	// Artifacts as Apply creates them: sanitized base name.
+	writeTarget(t, filepath.Join(dir, "my_app.go4updates.download1"), "litter", 0o600)
+	writeTarget(t, filepath.Join(dir, "my_app.go4updates.new2"), "litter", 0o600)
+
+	// Another binary's artifact and an unrelated file must survive.
+	writeTarget(t, filepath.Join(dir, "other.go4updates.download1"), "other", 0o600)
+	writeTarget(t, filepath.Join(dir, "app.backup"), "keep", 0o600)
+
+	i := newTestInstaller(t, target)
+
+	if err := i.Cleanup(); err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+
+	for _, name := range []string{"my_app.go4updates.download1", "my_app.go4updates.new2"} {
+		if _, err := os.Lstat(filepath.Join(dir, name)); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("staging artifact %q survived Cleanup", name)
+		}
+	}
+
+	if got := readFileForTest(t, filepath.Join(dir, "other.go4updates.download1")); got != "other" {
+		t.Error("another binary's artifact must not be removed")
+	}
+
+	if got := readFileForTest(t, filepath.Join(dir, "app.backup")); got != "keep" {
+		t.Error("unrelated file must not be removed")
+	}
+
+	if got := readFileForTest(t, target); got != "v2" {
+		t.Error("the target itself must not be removed")
 	}
 }
 

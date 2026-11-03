@@ -452,7 +452,11 @@ func (i *Installer) Cleanup() error {
 
 	target := i.targetPath
 	dir := filepath.Dir(target)
-	base := filepath.Base(target)
+
+	// Staging artifacts are created with the sanitized base name (it feeds
+	// an os.CreateTemp pattern), so the sweep must match the same form.
+	base := sanitizePattern(filepath.Base(target))
+
 	backup := target + BackupSuffix
 
 	var problems []error
