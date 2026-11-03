@@ -60,6 +60,26 @@ steps:
   # Current Go gets the same compile/vet/test coverage so forward breakage is
   # caught before it becomes a minimum-version bump.
 
+  # The selfupdate package contains platform-specific replacement logic.
+  # Runtime tests execute on Linux only; these gates keep the Windows and
+  # darwin code paths (including the windows-tagged tests) compiling.
+  # They belong to the current toolchain.
+
+  root-build-windows:
+    image: golang:1.27
+    environment:
+      GOCACHE: /tmp/.gocache
+    commands:
+      - GOOS=windows go build ./...
+      - GOOS=windows go vet ./...
+
+  root-build-darwin:
+    image: golang:1.27
+    environment:
+      GOCACHE: /tmp/.gocache
+    commands:
+      - GOOS=darwin go build ./...
+
   root-vet-go127:
     image: golang:1.27
     environment:
