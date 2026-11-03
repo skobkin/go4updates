@@ -525,11 +525,15 @@ func TestApplyAssetSelectionErrors(t *testing.T) {
 	})
 
 	t.Run("ambiguous assets", func(t *testing.T) {
+		// The second asset must match on every platform: a hardcoded
+		// platform literal leaves only one matching asset elsewhere, the
+		// error is not ErrAmbiguousAsset, and the mismatch is invisible to
+		// the Linux-only CI gates.
 		release := updates.Release{
 			Version: "v2.0.0",
 			Assets: []updates.Asset{
 				{Name: f.assetName},
-				{Name: fixtureAppName + "-2.0.0-linux-amd64.zip"},
+				{Name: fixtureAppName + "-2.0.0-" + runtime.GOOS + "-" + runtime.GOARCH + ".zip"},
 			},
 		}
 
