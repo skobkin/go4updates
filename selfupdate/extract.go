@@ -451,6 +451,7 @@ func extractFromTar(r io.Reader, executable, dstPath string) error {
 	var (
 		matches      []string
 		regularCount int
+		entries      int
 	)
 
 	for {
@@ -461,6 +462,16 @@ func extractFromTar(r io.Reader, executable, dstPath string) error {
 
 		if err != nil {
 			return fmt.Errorf("go4updates/selfupdate: reading tar archive: %w", err)
+		}
+
+		// Every entry — regular files, directories, and special members —
+		// counts against the same limit the zip path enforces: thousands of
+		// entries are a resource-exhaustion pattern, not a release layout.
+		entries++
+
+		if entries > maxArchiveEntries {
+			return fmt.Errorf("%w: archive contains %d entries, limit is %d",
+				ErrExtractedTooLarge, entries, maxArchiveEntries)
 		}
 
 		if hdr.Typeflag == tar.TypeDir {

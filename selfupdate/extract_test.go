@@ -674,6 +674,119 @@ func TestExtractZipDeclaredEntryFloodRejectedBeforeParsing(t *testing.T) {
 	})
 }
 
+// The tar entry limit applies to every entry — regular files, directories,
+// and special members alike — mirroring the zip path, so an entry flood in
+// any archive format is rejected instead of streamed through.
+func TestExtractTarEntryLimit(t *testing.T) {
+	build := func(t *testing.T, n int) (path, assetName string) {
+		t.Helper()
+
+		entries := make([]tarEntry, 0, n+1)
+		entries = append(entries, tarEntry{name: "app", content: "payload"})
+
+		for i := 0; len(entries) < n; i++ {
+			entries = append(entries, tarEntry{
+				name:    fmt.Sprintf("pad-%04d/", i),
+				dir:     true,
+				content: "",
+			})
+		}
+
+		for i := len(entries); i < n; i++ {
+			entries = append(entries, tarEntry{name: fmt.Sprintf("pad-%04d", i), content: "x"})
+		}
+
+		return buildTar(t, t.TempDir(), false, entries)
+	}
+
+	t.Run("entry flood is rejected", func(t *testing.T) {
+		path, assetName := build(t, maxArchiveEntries+1)
+
+		_, err := extractForTest(t, path, assetName, "app", "linux", DefaultMaxExtractedBytes)
+		if !errors.Is(err, ErrExtractedTooLarge) {
+			t.Fatalf("err = %v, want ErrExtractedTooLarge for a %d-entry tar", err, maxArchiveEntries+1)
+		}
+	})
+
+	t.Run("exactly the limit still extracts", func(t *testing.T) {
+		path, assetName := build(t, maxArchiveEntries)
+
+		got, err := extractForTest(t, path, assetName, "app", "linux", DefaultMaxExtractedBytes)
+		if err != nil {
+			t.Fatalf("extractBinary: %v", err)
+		}
+
+		if got != "payload" {
+			t.Errorf("extracted %q, want payload", got)
+		}
+	})
+}
+
+// legacyTarRegularEntry hand-builds one old-style USTAR regular-file entry
+// whose type byte is the legacy NUL representation instead of '0'. The
+// archive/tar writer promotes such headers before writing, so the legacy
+// wire form can only be produced by hand.
+func legacyTarRegularEntry(t *testing.T, name, content string) []byte {
+	t.Helper()
+
+	block := make([]byte, 512)
+
+	copy(block[0:100], name)
+	copy(block[100:108], "0000755") // mode
+	copy(block[108:116], "0000000") // uid
+	copy(block[116:124], "0000000") // gid
+	copy(block[124:136], fmt.Sprintf("%011o\x00", len(content)))
+	copy(block[136:148], fmt.Sprintf("%011o\x00", 1700000000))
+	copy(block[148:156], "        ") // chksum placeholder: spaces
+	block[156] = 0                   // legacy regular-file type byte
+	copy(block[257:263], "ustar\x00")
+	copy(block[263:265], "00")
+
+	sum := 0
+
+	for _, b := range block {
+		sum += int(b)
+	}
+
+	copy(block[148:156], fmt.Sprintf("%06o\x00 ", sum))
+
+	out := make([]byte, 0, 512+len(content)+1024)
+	out = append(out, block...)
+
+	out = append(out, []byte(content)...)
+
+	if pad := (512 - len(content)%512) % 512; pad != 0 {
+		out = append(out, make([]byte, pad)...)
+	}
+
+	return append(out, make([]byte, 1024)...) // two zero blocks end the archive
+}
+
+// The legacy NUL type byte is an accepted wire representation of a regular
+// file: archive/tar's reader normalizes it to TypeReg (or TypeDir for a
+// trailing slash) before the header is returned, so old archives extract
+// through the same regular-file path as modern ones.
+func TestExtractTarLegacyRegularTypeByte(t *testing.T) {
+	dir := t.TempDir()
+
+	path := filepath.Join(dir, "legacy.tar")
+
+	body := legacyTarRegularEntry(t, "app", "payload")
+
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatalf("writing legacy tar: %v", err)
+	}
+
+	got, err := extractForTest(t, path, "app_1.0.0_linux_amd64.tar", "app", "linux", DefaultMaxExtractedBytes)
+	if err != nil {
+		t.Fatalf("extractBinary: %v", err)
+	}
+
+	if got != "payload" {
+		t.Errorf("extracted %q, want payload", got)
+	}
+}
+
 // Regression: zip members authored on Windows separate path elements with
 // backslashes, but path.Base only splits on "/", so the member name was
 // compared as a whole and the executable was reported missing even though it
