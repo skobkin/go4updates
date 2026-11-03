@@ -188,6 +188,34 @@ func TestInstallBackupIsHardlinkOfOldBinary(t *testing.T) {
 	}
 }
 
+func TestInstallRefusesBackupWhenTargetMissing(t *testing.T) {
+	dir := t.TempDir()
+
+	target := filepath.Join(dir, "app")
+	backup := target + BackupSuffix
+
+	// Post-crash-window state: the target is missing while an unconfirmed
+	// backup remains. Installing must refuse instead of stranding the
+	// backup; the documented resolution is Cleanup (which restores the
+	// target) and a retry.
+	writeTarget(t, backup, "crash-window-residue", 0o755)
+
+	i := newTestInstaller(t, target)
+
+	_, err := i.Install(t.Context(), stagedFile(t, dir, "v2"))
+	if !errors.Is(err, ErrBackupExists) {
+		t.Fatalf("err = %v, want ErrBackupExists", err)
+	}
+
+	if _, statErr := os.Lstat(target); !errors.Is(statErr, fs.ErrNotExist) {
+		t.Error("a refused install must not create the target")
+	}
+
+	if got := readFileForTest(t, backup); got != "crash-window-residue" {
+		t.Errorf("backup content = %q, want untouched crash-window-residue", got)
+	}
+}
+
 func TestInstallRefusesExistingBackup(t *testing.T) {
 	dir := t.TempDir()
 

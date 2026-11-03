@@ -134,6 +134,11 @@ func resolveSymlinks(target string) string {
 // the backup path of the previous version (empty when the target did not
 // previously exist).
 //
+// A backup from an earlier unconfirmed install makes Install fail with
+// [ErrBackupExists] — whether or not the target itself exists: after a
+// Windows crash-window failure the target is missing while the backup
+// remains, and installing over that state would strand the backup.
+//
 // Failure semantics: when Install returns an error, the target was left
 // untouched unless errors.Is(err, [ErrReplaced]) — that sentinel reports a
 // replacement that already took effect, with the error concerning
@@ -158,8 +163,29 @@ func (i *Installer) Install(ctx context.Context, stagedPath string) (backupPath 
 	return i.installUnix(ctx, stagedPath, target, backup)
 }
 
+// checkBackupAbsent rejects the install while a backup from an earlier
+// unconfirmed install exists.
+func checkBackupAbsent(backup string) error {
+	_, statErr := os.Lstat(backup)
+
+	switch {
+	case statErr == nil:
+		return fmt.Errorf("%w: %s (confirm the installed version is healthy, call Cleanup, then retry)", ErrBackupExists, backup)
+
+	case errors.Is(statErr, fs.ErrNotExist):
+		return nil
+
+	default:
+		return fmt.Errorf("go4updates/selfupdate: inspecting %s: %w", backup, statErr)
+	}
+}
+
 // installUnix is the Unix replacement sequence described on Installer.
 func (i *Installer) installUnix(ctx context.Context, stagedPath, target, backup string) (string, error) {
+	if err := checkBackupAbsent(backup); err != nil {
+		return "", err
+	}
+
 	if err := i.prepareStaged(stagedPath, target); err != nil {
 		return "", err
 	}
@@ -185,13 +211,6 @@ func (i *Installer) installUnix(ctx context.Context, stagedPath, target, backup 
 
 	default:
 		return "", fmt.Errorf("go4updates/selfupdate: inspecting %s: %w", target, statErr)
-	}
-
-	if _, statErr := os.Lstat(backup); statErr == nil {
-		return "", fmt.Errorf("%w: %s (confirm the installed version is healthy, call Cleanup, then retry)",
-			ErrBackupExists, backup)
-	} else if !errors.Is(statErr, fs.ErrNotExist) {
-		return "", fmt.Errorf("go4updates/selfupdate: inspecting %s: %w", backup, statErr)
 	}
 
 	backupCreated, err := i.publishBackup(target, backup)
@@ -238,6 +257,14 @@ func (i *Installer) installUnix(ctx context.Context, stagedPath, target, backup 
 // Installer: a running executable can only be moved aside, not replaced in
 // place, which leaves a documented two-rename crash window.
 func (i *Installer) installWindows(ctx context.Context, stagedPath, target, backup string) (string, error) {
+	// The backup guard applies here too: os.Rename on Windows replaces an
+	// existing destination, so without the guard the move-aside step would
+	// silently overwrite an unconfirmed backup and destroy the rollback
+	// material.
+	if err := checkBackupAbsent(backup); err != nil {
+		return "", err
+	}
+
 	if err := i.prepareStaged(stagedPath, target); err != nil {
 		return "", err
 	}

@@ -53,6 +53,49 @@ func TestInstallWindowsReplacementDance(t *testing.T) {
 	}
 }
 
+func TestInstallWindowsRefusesExistingBackup(t *testing.T) {
+	dir := t.TempDir()
+
+	target := filepath.Join(dir, "app.exe")
+	stagedPath := filepath.Join(dir, "staged")
+
+	if err := os.WriteFile(target, []byte("v2"), 0o755); err != nil {
+		t.Fatalf("writing target: %v", err)
+	}
+
+	backup := target + BackupSuffix
+
+	if err := os.WriteFile(backup, []byte("previous-unconfirmed"), 0o755); err != nil {
+		t.Fatalf("writing backup: %v", err)
+	}
+
+	if err := os.WriteFile(stagedPath, []byte("v3"), 0o600); err != nil {
+		t.Fatalf("writing staged: %v", err)
+	}
+
+	i, err := NewInstaller(WithTargetPath(target))
+	if err != nil {
+		t.Fatalf("NewInstaller: %v", err)
+	}
+
+	// Without this guard the move-aside rename would silently overwrite the
+	// unconfirmed backup: os.Rename on Windows replaces an existing
+	// destination.
+	if _, err := i.Install(t.Context(), stagedPath); !errors.Is(err, ErrBackupExists) {
+		t.Fatalf("err = %v, want ErrBackupExists", err)
+	}
+
+	gotTarget, err := os.ReadFile(target)
+	if err != nil || string(gotTarget) != "v2" {
+		t.Errorf("target content = %q (%v), want untouched v2", gotTarget, err)
+	}
+
+	gotBackup, err := os.ReadFile(backup)
+	if err != nil || string(gotBackup) != "previous-unconfirmed" {
+		t.Errorf("backup content = %q (%v), want untouched previous-unconfirmed", gotBackup, err)
+	}
+}
+
 func TestCleanupWindowsRestoresMissingTarget(t *testing.T) {
 	dir := t.TempDir()
 
