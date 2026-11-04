@@ -208,6 +208,18 @@ func (e *progressEmitter) observe(current, total int64) {
 	e.cb(Progress{Stage: e.stage, AssetName: e.assetName, Current: current, Total: total})
 }
 
+// observer returns the byte-observation callback for pipeline plumbing:
+// nil when the emitter is inert, so callers skip wrapping readers and
+// writers entirely on the no-progress path. It keeps the nil decision in
+// one place instead of repeating the same gate at every pipeline stage.
+func (e *progressEmitter) observer() progressFunc {
+	if e.cb == nil {
+		return nil
+	}
+
+	return e.observe
+}
+
 // finalize reports the successful completion of the current stage with the
 // exact last observed byte counts. It is never called for a failed stage.
 func (e *progressEmitter) finalize() {

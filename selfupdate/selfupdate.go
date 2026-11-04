@@ -328,11 +328,7 @@ func (u *Updater) apply(ctx context.Context, result updates.Result, onProgress f
 
 	downloadPath = downloadTemp.Name()
 
-	var onDownloadBytes progressFunc
-
-	if onProgress != nil {
-		onDownloadBytes = emit.observe
-	}
+	onDownloadBytes := emit.observer()
 
 	if err := u.downloader.download(ctx, asset, downloadTemp, onDownloadBytes); err != nil {
 		_ = downloadTemp.Close()
@@ -361,11 +357,7 @@ func (u *Updater) apply(ctx context.Context, result updates.Result, onProgress f
 			}
 		}
 
-		var onVerifyBytes progressFunc
-
-		if onProgress != nil {
-			onVerifyBytes = emit.observe
-		}
+		onVerifyBytes := emit.observer()
 
 		data, err := os.Open(downloadPath)
 		if err != nil {
@@ -397,11 +389,7 @@ func (u *Updater) apply(ctx context.Context, result updates.Result, onProgress f
 
 	emit.transition(StageExtracting)
 
-	var onExtractBytes progressFunc
-
-	if onProgress != nil {
-		onExtractBytes = emit.observe
-	}
+	onExtractBytes := emit.observer()
 
 	if err := extractBinary(ctx, downloadPath, asset.Name, u.appName, runtime.GOOS, stagedPath, u.maxExtracted, onExtractBytes); err != nil {
 		return Applied{}, err
