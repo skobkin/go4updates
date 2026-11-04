@@ -66,6 +66,21 @@ var (
 	// atomic hardlinks, but this is not a locking system.
 	ErrBackupExists = errors.New("go4updates/selfupdate: backup of the previous executable already exists")
 
+	// ErrTargetNotRegular reports that the installation target exists but is
+	// not a regular file (a directory, symbolic link, or device node), so
+	// the updater refuses to replace it. Reported by
+	// [Updater.CheckInstallability]; Apply fails on the same condition with
+	// its own wrapped error.
+	ErrTargetNotRegular = errors.New("go4updates/selfupdate: installation target is not a regular file")
+
+	// ErrTargetNotExecutable reports that the target exists without
+	// executable permission bits and no mode is forced with [WithFileMode]:
+	// the replacement inherits the target mode and could not be run
+	// afterwards. Write bits on the target file itself are deliberately not
+	// checked — on Unix, directory permissions govern replacement, so a
+	// read-only executable is perfectly replaceable.
+	ErrTargetNotExecutable = errors.New("go4updates/selfupdate: installation target has no executable permission bits")
+
 	// ErrReplaced reports that the attempt changed the target name before
 	// the error being reported: either the replacement itself succeeded and
 	// the error concerns post-replacement work only (for example a

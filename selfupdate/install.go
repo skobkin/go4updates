@@ -66,12 +66,13 @@ type Installer struct {
 
 	// The following fields are seams for fault-injection tests; production
 	// constructors wire them to the os-level implementations.
-	linkFn    func(oldname, newname string) error
-	copyFn    func(dst io.Writer, srcPath string) error
-	renameFn  func(oldname, newname string) error
-	syncDirFn func(dir string) error
-	removeFn  func(name string) error
-	lstatFn   func(name string) (os.FileInfo, error)
+	linkFn       func(oldname, newname string) error
+	copyFn       func(dst io.Writer, srcPath string) error
+	renameFn     func(oldname, newname string) error
+	syncDirFn    func(dir string) error
+	removeFn     func(name string) error
+	lstatFn      func(name string) (os.FileInfo, error)
+	createTempFn func(dir, pattern string) (*os.File, error)
 }
 
 // NewInstaller creates an Installer from opts. It understands
@@ -100,12 +101,13 @@ func NewInstaller(opts ...Option) (*Installer, error) {
 		fileModeSet:     o.fileModeSet,
 		windowsSequence: runtime.GOOS == "windows",
 
-		linkFn:    os.Link,
-		copyFn:    copyFileTo,
-		renameFn:  os.Rename,
-		syncDirFn: syncDir,
-		removeFn:  os.Remove,
-		lstatFn:   os.Lstat,
+		linkFn:       os.Link,
+		copyFn:       copyFileTo,
+		renameFn:     os.Rename,
+		syncDirFn:    syncDir,
+		removeFn:     os.Remove,
+		lstatFn:      os.Lstat,
+		createTempFn: os.CreateTemp,
 	}, nil
 }
 
