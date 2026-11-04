@@ -126,9 +126,10 @@ func assertNoStagingLeftovers(t *testing.T, dir, base string) {
 	}
 
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), base+".go4updates.download") ||
-			strings.HasPrefix(e.Name(), base+".go4updates.new") ||
-			strings.HasPrefix(e.Name(), base+".go4updates.tmp") {
+		// Classify through production's isStagingArtifact, not a private
+		// copy of the prefix list: when production learns a new artifact
+		// class, the leftover assertions must learn it with it.
+		if isStagingArtifact(e.Name(), base) {
 			t.Errorf("staging leftover %q survived", e.Name())
 		}
 	}
