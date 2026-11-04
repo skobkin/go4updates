@@ -120,7 +120,10 @@ func (d *Downloader) download(ctx context.Context, asset updates.Asset, w io.Wri
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, asset.URL, nil)
 	if err != nil {
-		return fmt.Errorf("go4updates/selfupdate: building asset request: %w", err)
+		// url.Parse failures embed the raw URL — signed query tokens
+		// included — in their rendered message; the same redaction
+		// invariant as the request and status errors below applies here.
+		return fmt.Errorf("go4updates/selfupdate: building asset request: %w", fetch.SanitizeURLError(err))
 	}
 
 	resp, err := d.guardedClient().Do(req)
@@ -207,7 +210,9 @@ func (d *Downloader) guardedClient() *http.Client {
 func checkURLScheme(rawURL string, allowHTTP bool) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return fmt.Errorf("go4updates/selfupdate: parsing asset URL: %w", err)
+		// The parse error embeds the raw URL verbatim; sanitize it like
+		// every other error that carries the asset URL.
+		return fmt.Errorf("go4updates/selfupdate: parsing asset URL: %w", fetch.SanitizeURLError(err))
 	}
 
 	switch {

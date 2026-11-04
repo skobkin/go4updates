@@ -278,6 +278,39 @@ func TestDownloadErrorsRedactQueryTokens(t *testing.T) {
 	})
 }
 
+// Malformed URLs must not leak the raw asset URL either: url.Parse embeds
+// it verbatim — signed query tokens included — in its error message, and
+// the parse-error wraps used to bypass the redaction every other error
+// path applies.
+func TestDownloadParseErrorsRedactQueryTokens(t *testing.T) {
+	const tokenURL = "https://releases.example.com/app.zip?token=SECRET\n"
+
+	d, err := NewDownloader()
+	if err != nil {
+		t.Fatalf("NewDownloader: %v", err)
+	}
+
+	var buf bytes.Buffer
+
+	err = d.Download(t.Context(), updates.Asset{Name: "app", URL: tokenURL}, &buf)
+	if err == nil {
+		t.Fatal("Download with a malformed URL succeeded")
+	}
+
+	if strings.Contains(err.Error(), "SECRET") {
+		t.Fatalf("building-asset-request error leaked the raw URL: %v", err)
+	}
+
+	err = checkURLScheme(tokenURL, false)
+	if err == nil {
+		t.Fatal("checkURLScheme accepted a malformed URL")
+	}
+
+	if strings.Contains(err.Error(), "SECRET") {
+		t.Fatalf("parsing-asset-URL error leaked the raw URL: %v", err)
+	}
+}
+
 // failingTransport is a RoundTripper whose every request fails, standing in
 // for network-level errors the http.Client wraps in a *url.Error.
 type failingTransport struct{ err error }
