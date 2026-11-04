@@ -28,7 +28,7 @@ func TestExtractMaxInt64BoundDoesNotTruncate(t *testing.T) {
 
 	dstPath := filepath.Join(dir, "staged")
 
-	if err := extractBinary(t.Context(), archivePath, "app_1.0.0_linux_amd64.zip", "app", "linux", dstPath, math.MaxInt64); err != nil {
+	if err := extractBinary(t.Context(), archivePath, "app_1.0.0_linux_amd64.zip", "app", "linux", dstPath, math.MaxInt64, nil); err != nil {
 		t.Fatalf("extractBinary: %v", err)
 	}
 
@@ -225,7 +225,7 @@ func extractForTest(t *testing.T, archivePath, assetName, appName, goos string, 
 
 	dstPath := filepath.Join(t.TempDir(), "staged")
 
-	err := extractBinary(t.Context(), archivePath, assetName, appName, goos, dstPath, maxExtracted)
+	err := extractBinary(t.Context(), archivePath, assetName, appName, goos, dstPath, maxExtracted, nil)
 	if err != nil {
 		return "", err
 	}
@@ -523,7 +523,7 @@ func TestExtractBinaryZipSlip(t *testing.T) {
 
 	dstPath := filepath.Join(staging, "staged")
 
-	err := extractBinary(t.Context(), path, "app_1.0.0_linux_amd64.zip", "app", "linux", dstPath, DefaultMaxExtractedBytes)
+	err := extractBinary(t.Context(), path, "app_1.0.0_linux_amd64.zip", "app", "linux", dstPath, DefaultMaxExtractedBytes, nil)
 	if err != nil {
 		t.Fatalf("extractBinary: %v", err)
 	}
@@ -549,7 +549,7 @@ func TestExtractBinaryBombs(t *testing.T) {
 
 		dstPath := filepath.Join(t.TempDir(), "staged")
 
-		err := extractBinary(t.Context(), path, assetName, "app", "linux", dstPath, limit)
+		err := extractBinary(t.Context(), path, assetName, "app", "linux", dstPath, limit, nil)
 		if !errors.Is(err, ErrExtractedTooLarge) {
 			t.Fatalf("err = %v, want ErrExtractedTooLarge", err)
 		}
@@ -567,7 +567,7 @@ func TestExtractBinaryBombs(t *testing.T) {
 
 		dstPath := filepath.Join(t.TempDir(), "staged")
 
-		err := extractBinary(t.Context(), path, "app_1.0.0_linux_amd64.zip", "app", "linux", dstPath, limit)
+		err := extractBinary(t.Context(), path, "app_1.0.0_linux_amd64.zip", "app", "linux", dstPath, limit, nil)
 		if !errors.Is(err, ErrExtractedTooLarge) {
 			t.Fatalf("err = %v, want ErrExtractedTooLarge", err)
 		}
@@ -586,7 +586,7 @@ func TestExtractBinaryBombs(t *testing.T) {
 
 		dstPath := filepath.Join(t.TempDir(), "staged")
 
-		err := extractBinary(t.Context(), path, "app_1.0.0_linux_amd64.zip", "app", "linux", dstPath, DefaultMaxExtractedBytes)
+		err := extractBinary(t.Context(), path, "app_1.0.0_linux_amd64.zip", "app", "linux", dstPath, DefaultMaxExtractedBytes, nil)
 		if !errors.Is(err, ErrExtractedTooLarge) {
 			t.Fatalf("err = %v, want ErrExtractedTooLarge for the entry flood", err)
 		}
@@ -650,7 +650,7 @@ func TestExtractZipDeclaredEntryFloodRejectedBeforeParsing(t *testing.T) {
 
 		dstPath := filepath.Join(dir, "staged")
 
-		err := extractBinary(t.Context(), path, "app_1.0.0_linux_amd64.zip", "app", "linux", dstPath, DefaultMaxExtractedBytes)
+		err := extractBinary(t.Context(), path, "app_1.0.0_linux_amd64.zip", "app", "linux", dstPath, DefaultMaxExtractedBytes, nil)
 		if !errors.Is(err, ErrExtractedTooLarge) {
 			t.Fatalf("err = %v, want ErrExtractedTooLarge for the zip64-declared flood", err)
 		}
@@ -668,7 +668,7 @@ func TestExtractZipDeclaredEntryFloodRejectedBeforeParsing(t *testing.T) {
 
 		dstPath := filepath.Join(dir, "staged")
 
-		err := extractBinary(t.Context(), path, "app_1.0.0_linux_amd64.zip", "app", "linux", dstPath, DefaultMaxExtractedBytes)
+		err := extractBinary(t.Context(), path, "app_1.0.0_linux_amd64.zip", "app", "linux", dstPath, DefaultMaxExtractedBytes, nil)
 		if !errors.Is(err, ErrExtractedTooLarge) {
 			t.Fatalf("err = %v, want ErrExtractedTooLarge for the EOCD-declared flood", err)
 		}
@@ -802,7 +802,7 @@ func TestExtractZipWindowsBackslashMember(t *testing.T) {
 
 	dstPath := filepath.Join(dir, "staged")
 
-	if err := extractBinary(t.Context(), path, "app_1.0.0_windows_amd64.zip", "app", "windows", dstPath, DefaultMaxExtractedBytes); err != nil {
+	if err := extractBinary(t.Context(), path, "app_1.0.0_windows_amd64.zip", "app", "windows", dstPath, DefaultMaxExtractedBytes, nil); err != nil {
 		t.Fatalf("extractBinary: %v", err)
 	}
 
@@ -826,7 +826,7 @@ func TestExtractMemberNameCaseInsensitive(t *testing.T) {
 
 		dstPath := filepath.Join(dir, "staged")
 
-		if err := extractBinary(t.Context(), path, assetName, "app", "linux", dstPath, DefaultMaxExtractedBytes); err != nil {
+		if err := extractBinary(t.Context(), path, assetName, "app", "linux", dstPath, DefaultMaxExtractedBytes, nil); err != nil {
 			t.Fatalf("extractBinary: %v", err)
 		}
 
@@ -845,7 +845,7 @@ func TestExtractMemberNameCaseInsensitive(t *testing.T) {
 
 		dstPath := filepath.Join(dir, "staged")
 
-		if err := extractBinary(t.Context(), path, "app_1.0.0_windows_amd64.zip", "app", "windows", dstPath, DefaultMaxExtractedBytes); err != nil {
+		if err := extractBinary(t.Context(), path, "app_1.0.0_windows_amd64.zip", "app", "windows", dstPath, DefaultMaxExtractedBytes, nil); err != nil {
 			t.Fatalf("extractBinary: %v", err)
 		}
 
@@ -864,7 +864,7 @@ func TestExtractMemberNameCaseInsensitive(t *testing.T) {
 
 		dstPath := filepath.Join(dir, "staged")
 
-		err := extractBinary(t.Context(), path, "app_1.0.0_windows_amd64.zip", "app", "windows", dstPath, DefaultMaxExtractedBytes)
+		err := extractBinary(t.Context(), path, "app_1.0.0_windows_amd64.zip", "app", "windows", dstPath, DefaultMaxExtractedBytes, nil)
 		if !errors.Is(err, ErrAmbiguousExecutable) {
 			t.Fatalf("err = %v, want ErrAmbiguousExecutable", err)
 		}
@@ -891,7 +891,7 @@ func TestExtractBinaryCanceledContext(t *testing.T) {
 
 		dstPath := filepath.Join(dir, "staged")
 
-		err := extractBinary(newCtx(), path, assetName, "app", "linux", dstPath, DefaultMaxExtractedBytes)
+		err := extractBinary(newCtx(), path, assetName, "app", "linux", dstPath, DefaultMaxExtractedBytes, nil)
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("err = %v, want context.Canceled", err)
 		}
@@ -906,7 +906,7 @@ func TestExtractBinaryCanceledContext(t *testing.T) {
 
 		dstPath := filepath.Join(dir, "staged")
 
-		err := extractBinary(newCtx(), path, "app_1.0.0_linux_amd64.zip", "app", "linux", dstPath, DefaultMaxExtractedBytes)
+		err := extractBinary(newCtx(), path, "app_1.0.0_linux_amd64.zip", "app", "linux", dstPath, DefaultMaxExtractedBytes, nil)
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("err = %v, want context.Canceled", err)
 		}
@@ -921,7 +921,7 @@ func TestExtractBinaryCanceledContext(t *testing.T) {
 
 		dstPath := filepath.Join(dir, "staged")
 
-		err := extractBinary(newCtx(), path, assetName, "app", "linux", dstPath, DefaultMaxExtractedBytes)
+		err := extractBinary(newCtx(), path, assetName, "app", "linux", dstPath, DefaultMaxExtractedBytes, nil)
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("err = %v, want context.Canceled", err)
 		}
@@ -936,7 +936,7 @@ func TestExtractBinaryCanceledContext(t *testing.T) {
 
 		dstPath := filepath.Join(dir, "staged")
 
-		err := extractBinary(newCtx(), path, assetName, "app", "linux", dstPath, DefaultMaxExtractedBytes)
+		err := extractBinary(newCtx(), path, assetName, "app", "linux", dstPath, DefaultMaxExtractedBytes, nil)
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("err = %v, want context.Canceled", err)
 		}
@@ -959,7 +959,7 @@ func TestExtractBinaryCanceledContext(t *testing.T) {
 
 		src := &cancelingReader{r: bytes.NewReader(tarBytes), cancel: cancel}
 
-		err := extractFromTar(ctx, src, "app", dstPath)
+		err := extractFromTar(ctx, src, "app", dstPath, nil)
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("err = %v, want context.Canceled", err)
 		}
@@ -1002,7 +1002,7 @@ func TestExtractCancelErrorLabel(t *testing.T) {
 
 	cancel()
 
-	err := extractBinary(liveCtx, path, assetName, "app", "linux", filepath.Join(dir, "staged"), DefaultMaxExtractedBytes)
+	err := extractBinary(liveCtx, path, assetName, "app", "linux", filepath.Join(dir, "staged"), DefaultMaxExtractedBytes, nil)
 	if err == nil || !strings.Contains(err.Error(), "extraction canceled") {
 		t.Fatalf("err = %v, want extraction canceled label", err)
 	}

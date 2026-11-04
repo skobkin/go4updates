@@ -183,8 +183,10 @@ const DefaultMaxExtractedBytes int64 = 512 << 20 // 512 MiB
 //
 // The context bounds the streaming: a cancellation between archive reads
 // aborts extraction with an error wrapping the context error, and no
-// partial output survives at dstPath.
-func extractBinary(ctx context.Context, archivePath, assetName, appName, goos, dstPath string, maxExtracted int64) error {
+// partial output survives at dstPath. Byte observations of the streamed
+// executable are reported to onBytes when it is not nil; total is zero for
+// formats that do not declare the member size.
+func extractBinary(ctx context.Context, archivePath, assetName, appName, goos, dstPath string, maxExtracted int64, onBytes progressFunc) error {
 	kind, err := classifyAssetName(assetName)
 	if err != nil {
 		return err
@@ -194,16 +196,16 @@ func extractBinary(ctx context.Context, archivePath, assetName, appName, goos, d
 
 	switch kind {
 	case kindZip:
-		err = extractFromZip(ctx, archivePath, executable, dstPath, maxExtracted)
+		err = extractFromZip(ctx, archivePath, executable, dstPath, maxExtracted, onBytes)
 
 	case kindTarGz, kindTar:
-		err = extractTarArchive(ctx, archivePath, kind == kindTarGz, executable, dstPath, maxExtracted)
+		err = extractTarArchive(ctx, archivePath, kind == kindTarGz, executable, dstPath, maxExtracted, onBytes)
 
 	case kindGz:
-		err = extractGzipMember(ctx, archivePath, dstPath, maxExtracted)
+		err = extractGzipMember(ctx, archivePath, dstPath, maxExtracted, onBytes)
 
 	default: // kindRaw: the asset itself is the executable
-		err = extractRawAsset(ctx, archivePath, dstPath, maxExtracted)
+		err = extractRawAsset(ctx, archivePath, dstPath, maxExtracted, onBytes)
 	}
 
 	return wrapExtractCancel(err)
@@ -240,7 +242,7 @@ func (c *ctxReader) Read(p []byte) (int, error) {
 
 // extractTarArchive opens the tar (optionally gzip-compressed) archive at
 // archivePath and extracts the executable member from it.
-func extractTarArchive(ctx context.Context, archivePath string, gzipped bool, executable, dstPath string, maxExtracted int64) error {
+func extractTarArchive(ctx context.Context, archivePath string, gzipped bool, executable, dstPath string, maxExtracted int64, onBytes progressFunc) error {
 	f, err := os.Open(archivePath)
 	if err != nil {
 		return fmt.Errorf("go4updates/selfupdate: opening archive: %w", err)
@@ -263,12 +265,12 @@ func extractTarArchive(ctx context.Context, archivePath string, gzipped bool, ex
 
 	bounded := &boundedReader{r: &ctxReader{ctx: ctx, r: src}, maxBytes: maxExtracted}
 
-	return extractFromTar(ctx, bounded, executable, dstPath)
+	return extractFromTar(ctx, bounded, executable, dstPath, onBytes)
 }
 
 // extractRawAsset streams the asset at archivePath itself into dstPath; the
 // asset is the executable, no archive unwrapping happens.
-func extractRawAsset(ctx context.Context, archivePath, dstPath string, maxExtracted int64) error {
+func extractRawAsset(ctx context.Context, archivePath, dstPath string, maxExtracted int64, onBytes progressFunc) error {
 	f, err := os.Open(archivePath)
 	if err != nil {
 		return fmt.Errorf("go4updates/selfupdate: opening asset: %w", err)
@@ -278,7 +280,7 @@ func extractRawAsset(ctx context.Context, archivePath, dstPath string, maxExtrac
 
 	bounded := &boundedReader{r: &ctxReader{ctx: ctx, r: f}, maxBytes: maxExtracted}
 
-	return streamToFile(dstPath, bounded)
+	return streamToFile(dstPath, bounded, onBytes, 0)
 }
 
 // executableName derives the executable file name to look for inside
@@ -314,14 +316,22 @@ func (b *boundedReader) Read(p []byte) (int, error) {
 }
 
 // streamToFile creates dstPath (mode 0600; the installer applies the final
-// mode) and streams r into it.
-func streamToFile(dstPath string, r io.Reader) error {
+// mode) and streams r into it, reporting copied bytes to onBytes when it is
+// not nil. total is the declared member size when the format declares one,
+// and zero when it does not.
+func streamToFile(dstPath string, r io.Reader, onBytes progressFunc, total int64) error {
 	f, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return fmt.Errorf("go4updates/selfupdate: creating staged file: %w", err)
 	}
 
-	if _, err := io.Copy(f, r); err != nil {
+	var sink io.Writer = f
+
+	if onBytes != nil {
+		sink = &progressWriter{w: f, onBytes: onBytes, total: total}
+	}
+
+	if _, err := io.Copy(sink, r); err != nil {
 		_ = f.Close()
 
 		_ = os.Remove(dstPath)
@@ -392,8 +402,9 @@ func scanZip(files []*zip.File, executable string) zipScan {
 
 // extractFromZip extracts the executable member from a ZIP archive. Zip
 // members are randomly accessible, so selection happens first and the chosen
-// member is streamed second. The context bounds the member streaming.
-func extractFromZip(ctx context.Context, archivePath, executable, dstPath string, maxExtracted int64) error {
+// member is streamed second. The context bounds the member streaming; byte
+// observations carry the member's declared UncompressedSize64 as total.
+func extractFromZip(ctx context.Context, archivePath, executable, dstPath string, maxExtracted int64, onBytes progressFunc) error {
 	// Reject archives that declare more entries than the limit before
 	// archive/zip walks the declared directory. When the declaration cannot
 	// be read, OpenReader reports the format problem itself.
@@ -447,7 +458,7 @@ func extractFromZip(ctx context.Context, archivePath, executable, dstPath string
 
 	defer func() { _ = rc.Close() }()
 
-	if err := copyBounded(dstPath, &ctxReader{ctx: ctx, r: rc}, maxExtracted); err != nil {
+	if err := copyBounded(dstPath, &ctxReader{ctx: ctx, r: rc}, maxExtracted, onBytes, int64(chosen.file.UncompressedSize64)); err != nil {
 		return fmt.Errorf("go4updates/selfupdate: extracting archive member %q: %w", chosen.name, err)
 	}
 
@@ -456,8 +467,9 @@ func extractFromZip(ctx context.Context, archivePath, executable, dstPath string
 
 // extractGzipMember decompresses a single-member gzip stream into dstPath;
 // the decompressed content is the executable itself. The context bounds the
-// decompression.
-func extractGzipMember(ctx context.Context, archivePath, dstPath string, maxExtracted int64) error {
+// decompression; the format declares no upfront member size, so byte
+// observations carry a zero total.
+func extractGzipMember(ctx context.Context, archivePath, dstPath string, maxExtracted int64, onBytes progressFunc) error {
 	f, err := os.Open(archivePath)
 	if err != nil {
 		return fmt.Errorf("go4updates/selfupdate: opening archive: %w", err)
@@ -474,7 +486,7 @@ func extractGzipMember(ctx context.Context, archivePath, dstPath string, maxExtr
 
 	bounded := &boundedReader{r: &ctxReader{ctx: ctx, r: gz}, maxBytes: maxExtracted}
 
-	return streamToFile(dstPath, bounded)
+	return streamToFile(dstPath, bounded, onBytes, 0)
 }
 
 // extractFromTar extracts the executable member from a tar stream read from
@@ -488,8 +500,9 @@ func extractGzipMember(ctx context.Context, archivePath, dstPath string, maxExtr
 // archive without a name-matched executable fails with
 // [ErrExecutableNotFound]. On error, no partial output survives at dstPath.
 // The context is checked between archive entries; mid-entry cancellation
-// surfaces through the stream reader.
-func extractFromTar(ctx context.Context, r io.Reader, executable, dstPath string) error {
+// surfaces through the stream reader. Byte observations of the matched
+// member carry the header's declared size as total.
+func extractFromTar(ctx context.Context, r io.Reader, executable, dstPath string, onBytes progressFunc) error {
 	ok := false
 
 	defer func() {
@@ -560,7 +573,7 @@ func extractFromTar(ctx context.Context, r io.Reader, executable, dstPath string
 			return fmt.Errorf("%w: %s", ErrAmbiguousExecutable, joinQuoted(matches))
 		}
 
-		if err := streamToFile(dstPath, tr); err != nil {
+		if err := streamToFile(dstPath, tr, onBytes, hdr.Size); err != nil {
 			return fmt.Errorf("go4updates/selfupdate: extracting archive member %q: %w", hdr.Name, err)
 		}
 	}
@@ -579,9 +592,10 @@ func extractFromTar(ctx context.Context, r io.Reader, executable, dstPath string
 // with [ErrExtractedTooLarge] once more than maxExtracted bytes are read.
 // The counting reader is used directly instead of an io.LimitReader(max+1)
 // wrapper, which would overflow for a maxExtracted of math.MaxInt64 and
-// silently truncate the member to zero bytes.
-func copyBounded(dstPath string, r io.Reader, maxExtracted int64) error {
-	return streamToFile(dstPath, &boundedReader{r: r, maxBytes: maxExtracted})
+// silently truncate the member to zero bytes. Byte observations are
+// reported to onBytes with the declared total when it is not nil.
+func copyBounded(dstPath string, r io.Reader, maxExtracted int64, onBytes progressFunc, total int64) error {
+	return streamToFile(dstPath, &boundedReader{r: r, maxBytes: maxExtracted}, onBytes, total)
 }
 
 // namesOf lists candidate names for error messages.

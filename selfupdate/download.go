@@ -106,6 +106,14 @@ func NewDownloader(opts ...Option) (*Downloader, error) {
 // The context bounds the whole transfer; cancellation surfaces as an error
 // wrapping the context error.
 func (d *Downloader) Download(ctx context.Context, asset updates.Asset, w io.Writer) error {
+	return d.download(ctx, asset, w, nil)
+}
+
+// download implements Download, reporting streaming progress to onBytes
+// when it is not nil. The first observation carries the declared
+// Content-Length as the total (zero when the server does not declare one);
+// the counting sink reports each copied chunk afterwards.
+func (d *Downloader) download(ctx context.Context, asset updates.Asset, w io.Writer, onBytes progressFunc) error {
 	if err := checkURLScheme(asset.URL, d.allowHTTP); err != nil {
 		return err
 	}
@@ -136,6 +144,21 @@ func (d *Downloader) Download(ctx context.Context, asset updates.Asset, w io.Wri
 			ErrAssetTooLarge, asset.Name, resp.ContentLength, d.maxBytes)
 	}
 
+	// Report the declared total before the first byte is read, so
+	// consumers learn whether the stage is determinate upfront. An unknown
+	// total is not reported here: the first chunk observation carries it.
+	// A chunked response reports a negative Content-Length; it means
+	// unknown, never a negative total.
+	total := resp.ContentLength
+
+	if total < 0 {
+		total = 0
+	}
+
+	if onBytes != nil && total > 0 {
+		onBytes(0, total)
+	}
+
 	// The LimitReader sentinel (limit+1) would overflow for a limit of
 	// math.MaxInt64, truncating the transfer to zero bytes; only apply it
 	// when there is headroom, the streamed-byte check below covers the
@@ -146,7 +169,13 @@ func (d *Downloader) Download(ctx context.Context, asset updates.Asset, w io.Wri
 		body = io.LimitReader(body, d.maxBytes+1)
 	}
 
-	n, err := io.Copy(w, body)
+	sink := w
+
+	if onBytes != nil {
+		sink = &progressWriter{w: w, onBytes: onBytes, total: total}
+	}
+
+	n, err := io.Copy(sink, body)
 	if err != nil {
 		return fmt.Errorf("go4updates/selfupdate: downloading asset %q: %w", asset.Name, err)
 	}

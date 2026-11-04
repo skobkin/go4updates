@@ -30,6 +30,11 @@ type updateFixture struct {
 	dir    string
 
 	assetName string
+
+	// zipSize is the exact byte size of the served zip payload, so tests
+	// can assert exact progress totals (Asset.Size is advisory and here
+	// deliberately wrong).
+	zipSize int64
 }
 
 const (
@@ -91,7 +96,7 @@ func newUpdateFixture(t *testing.T) *updateFixture {
 		t.Fatalf("writing fake target: %v", err)
 	}
 
-	return &updateFixture{srv: srv, target: target, dir: dir, assetName: assetName}
+	return &updateFixture{srv: srv, target: target, dir: dir, assetName: assetName, zipSize: int64(len(zipBytes))}
 }
 
 func (f *updateFixture) release() updates.Release {
