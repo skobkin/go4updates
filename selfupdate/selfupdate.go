@@ -293,7 +293,7 @@ func (u *Updater) Apply(ctx context.Context, result updates.Result) (Applied, er
 	stagedPath = stagedTemp.Name()
 	_ = stagedTemp.Close()
 
-	if err := extractBinary(downloadPath, asset.Name, u.appName, runtime.GOOS, stagedPath, u.maxExtracted); err != nil {
+	if err := extractBinary(ctx, downloadPath, asset.Name, u.appName, runtime.GOOS, stagedPath, u.maxExtracted); err != nil {
 		return Applied{}, err
 	}
 

@@ -103,7 +103,7 @@ func (v *ChecksumVerifier) Verify(ctx context.Context, release updates.Release, 
 		return err
 	}
 
-	actual, err := hexDigest(data)
+	actual, err := hexDigest(ctx, data)
 	if err != nil {
 		return fmt.Errorf("go4updates/selfupdate: hashing asset %q: %w", asset.Name, err)
 	}
@@ -351,13 +351,31 @@ func isHex64(s string) bool {
 	return true
 }
 
-// hexDigest computes the lowercase hex SHA-256 digest of data.
-func hexDigest(data io.Reader) (string, error) {
+// hexDigest computes the lowercase hex SHA-256 digest of data. The context
+// is checked between chunks, so hashing a large asset aborts promptly on
+// cancellation instead of running to completion.
+func hexDigest(ctx context.Context, data io.Reader) (string, error) {
 	h := sha256.New()
 
-	if _, err := io.Copy(h, data); err != nil {
-		return "", err
-	}
+	buf := make([]byte, 32<<10)
 
-	return hex.EncodeToString(h.Sum(nil)), nil
+	for {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+
+		n, err := data.Read(buf)
+
+		if n > 0 {
+			_, _ = h.Write(buf[:n])
+		}
+
+		switch {
+		case err == io.EOF:
+			return hex.EncodeToString(h.Sum(nil)), nil
+
+		case err != nil:
+			return "", err
+		}
+	}
 }

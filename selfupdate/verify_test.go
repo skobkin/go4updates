@@ -2,6 +2,7 @@ package selfupdate
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -362,5 +363,37 @@ func TestFindChecksumSourceSiblingPrecedence(t *testing.T) {
 
 	if want := assetName + ".sha256"; source.asset.Name != want {
 		t.Errorf("selected %q, want %q per the documented precedence", source.asset.Name, want)
+	}
+}
+
+// Hashing must observe cancellation between chunks instead of running a
+// large asset to completion.
+func TestHexDigestCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	cancel()
+
+	payload := strings.Repeat("a", 1<<20) // larger than the hashing chunk
+
+	_, err := hexDigest(ctx, strings.NewReader(payload))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+}
+
+// A canceled context mid-hash surfaces the same way.
+func TestHexDigestContextCancelMidStream(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	src := &cancelingReader{r: strings.NewReader(strings.Repeat("a", 64<<10)), cancel: cancel}
+
+	digest, err := hexDigest(ctx, src)
+	if err == nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+
+	if digest != "" {
+		t.Fatalf("digest = %q on failure, want empty", digest)
 	}
 }

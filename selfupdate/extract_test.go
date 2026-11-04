@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -27,7 +28,7 @@ func TestExtractMaxInt64BoundDoesNotTruncate(t *testing.T) {
 
 	dstPath := filepath.Join(dir, "staged")
 
-	if err := extractBinary(archivePath, "app_1.0.0_linux_amd64.zip", "app", "linux", dstPath, math.MaxInt64); err != nil {
+	if err := extractBinary(t.Context(), archivePath, "app_1.0.0_linux_amd64.zip", "app", "linux", dstPath, math.MaxInt64); err != nil {
 		t.Fatalf("extractBinary: %v", err)
 	}
 
@@ -224,7 +225,7 @@ func extractForTest(t *testing.T, archivePath, assetName, appName, goos string, 
 
 	dstPath := filepath.Join(t.TempDir(), "staged")
 
-	err := extractBinary(archivePath, assetName, appName, goos, dstPath, maxExtracted)
+	err := extractBinary(t.Context(), archivePath, assetName, appName, goos, dstPath, maxExtracted)
 	if err != nil {
 		return "", err
 	}
@@ -522,7 +523,7 @@ func TestExtractBinaryZipSlip(t *testing.T) {
 
 	dstPath := filepath.Join(staging, "staged")
 
-	err := extractBinary(path, "app_1.0.0_linux_amd64.zip", "app", "linux", dstPath, DefaultMaxExtractedBytes)
+	err := extractBinary(t.Context(), path, "app_1.0.0_linux_amd64.zip", "app", "linux", dstPath, DefaultMaxExtractedBytes)
 	if err != nil {
 		t.Fatalf("extractBinary: %v", err)
 	}
@@ -548,7 +549,7 @@ func TestExtractBinaryBombs(t *testing.T) {
 
 		dstPath := filepath.Join(t.TempDir(), "staged")
 
-		err := extractBinary(path, assetName, "app", "linux", dstPath, limit)
+		err := extractBinary(t.Context(), path, assetName, "app", "linux", dstPath, limit)
 		if !errors.Is(err, ErrExtractedTooLarge) {
 			t.Fatalf("err = %v, want ErrExtractedTooLarge", err)
 		}
@@ -566,7 +567,7 @@ func TestExtractBinaryBombs(t *testing.T) {
 
 		dstPath := filepath.Join(t.TempDir(), "staged")
 
-		err := extractBinary(path, "app_1.0.0_linux_amd64.zip", "app", "linux", dstPath, limit)
+		err := extractBinary(t.Context(), path, "app_1.0.0_linux_amd64.zip", "app", "linux", dstPath, limit)
 		if !errors.Is(err, ErrExtractedTooLarge) {
 			t.Fatalf("err = %v, want ErrExtractedTooLarge", err)
 		}
@@ -585,7 +586,7 @@ func TestExtractBinaryBombs(t *testing.T) {
 
 		dstPath := filepath.Join(t.TempDir(), "staged")
 
-		err := extractBinary(path, "app_1.0.0_linux_amd64.zip", "app", "linux", dstPath, DefaultMaxExtractedBytes)
+		err := extractBinary(t.Context(), path, "app_1.0.0_linux_amd64.zip", "app", "linux", dstPath, DefaultMaxExtractedBytes)
 		if !errors.Is(err, ErrExtractedTooLarge) {
 			t.Fatalf("err = %v, want ErrExtractedTooLarge for the entry flood", err)
 		}
@@ -649,7 +650,7 @@ func TestExtractZipDeclaredEntryFloodRejectedBeforeParsing(t *testing.T) {
 
 		dstPath := filepath.Join(dir, "staged")
 
-		err := extractBinary(path, "app_1.0.0_linux_amd64.zip", "app", "linux", dstPath, DefaultMaxExtractedBytes)
+		err := extractBinary(t.Context(), path, "app_1.0.0_linux_amd64.zip", "app", "linux", dstPath, DefaultMaxExtractedBytes)
 		if !errors.Is(err, ErrExtractedTooLarge) {
 			t.Fatalf("err = %v, want ErrExtractedTooLarge for the zip64-declared flood", err)
 		}
@@ -667,7 +668,7 @@ func TestExtractZipDeclaredEntryFloodRejectedBeforeParsing(t *testing.T) {
 
 		dstPath := filepath.Join(dir, "staged")
 
-		err := extractBinary(path, "app_1.0.0_linux_amd64.zip", "app", "linux", dstPath, DefaultMaxExtractedBytes)
+		err := extractBinary(t.Context(), path, "app_1.0.0_linux_amd64.zip", "app", "linux", dstPath, DefaultMaxExtractedBytes)
 		if !errors.Is(err, ErrExtractedTooLarge) {
 			t.Fatalf("err = %v, want ErrExtractedTooLarge for the EOCD-declared flood", err)
 		}
@@ -801,7 +802,7 @@ func TestExtractZipWindowsBackslashMember(t *testing.T) {
 
 	dstPath := filepath.Join(dir, "staged")
 
-	if err := extractBinary(path, "app_1.0.0_windows_amd64.zip", "app", "windows", dstPath, DefaultMaxExtractedBytes); err != nil {
+	if err := extractBinary(t.Context(), path, "app_1.0.0_windows_amd64.zip", "app", "windows", dstPath, DefaultMaxExtractedBytes); err != nil {
 		t.Fatalf("extractBinary: %v", err)
 	}
 
@@ -825,7 +826,7 @@ func TestExtractMemberNameCaseInsensitive(t *testing.T) {
 
 		dstPath := filepath.Join(dir, "staged")
 
-		if err := extractBinary(path, assetName, "app", "linux", dstPath, DefaultMaxExtractedBytes); err != nil {
+		if err := extractBinary(t.Context(), path, assetName, "app", "linux", dstPath, DefaultMaxExtractedBytes); err != nil {
 			t.Fatalf("extractBinary: %v", err)
 		}
 
@@ -844,7 +845,7 @@ func TestExtractMemberNameCaseInsensitive(t *testing.T) {
 
 		dstPath := filepath.Join(dir, "staged")
 
-		if err := extractBinary(path, "app_1.0.0_windows_amd64.zip", "app", "windows", dstPath, DefaultMaxExtractedBytes); err != nil {
+		if err := extractBinary(t.Context(), path, "app_1.0.0_windows_amd64.zip", "app", "windows", dstPath, DefaultMaxExtractedBytes); err != nil {
 			t.Fatalf("extractBinary: %v", err)
 		}
 
@@ -863,9 +864,150 @@ func TestExtractMemberNameCaseInsensitive(t *testing.T) {
 
 		dstPath := filepath.Join(dir, "staged")
 
-		err := extractBinary(path, "app_1.0.0_windows_amd64.zip", "app", "windows", dstPath, DefaultMaxExtractedBytes)
+		err := extractBinary(t.Context(), path, "app_1.0.0_windows_amd64.zip", "app", "windows", dstPath, DefaultMaxExtractedBytes)
 		if !errors.Is(err, ErrAmbiguousExecutable) {
 			t.Fatalf("err = %v, want ErrAmbiguousExecutable", err)
 		}
 	})
+}
+
+// Cancellation must abort every streaming format promptly, with the context
+// error in the chain and no partial output left at dstPath.
+func TestExtractBinaryCanceledContext(t *testing.T) {
+	newCtx := func() context.Context {
+		ctx, cancel := context.WithCancel(context.Background())
+
+		cancel()
+
+		return ctx
+	}
+
+	t.Run("already canceled context rejects tar.gz before extraction", func(t *testing.T) {
+		dir := t.TempDir()
+
+		path, assetName := buildTar(t, dir, false, []tarEntry{
+			{name: "app", content: "payload"},
+		})
+
+		dstPath := filepath.Join(dir, "staged")
+
+		err := extractBinary(newCtx(), path, assetName, "app", "linux", dstPath, DefaultMaxExtractedBytes)
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v, want context.Canceled", err)
+		}
+
+		assertNoStagingLeftovers(t, dir, "staged")
+	})
+
+	t.Run("already canceled context rejects zip before extraction", func(t *testing.T) {
+		dir := t.TempDir()
+
+		path := buildZip(t, dir, []zipEntry{{name: "app", content: "payload"}})
+
+		dstPath := filepath.Join(dir, "staged")
+
+		err := extractBinary(newCtx(), path, "app_1.0.0_linux_amd64.zip", "app", "linux", dstPath, DefaultMaxExtractedBytes)
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v, want context.Canceled", err)
+		}
+
+		assertNoStagingLeftovers(t, dir, "staged")
+	})
+
+	t.Run("already canceled context rejects gzip member", func(t *testing.T) {
+		dir := t.TempDir()
+
+		path, assetName := buildGzipFile(t, dir, "payload")
+
+		dstPath := filepath.Join(dir, "staged")
+
+		err := extractBinary(newCtx(), path, assetName, "app", "linux", dstPath, DefaultMaxExtractedBytes)
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v, want context.Canceled", err)
+		}
+
+		assertNoStagingLeftovers(t, dir, "staged")
+	})
+
+	t.Run("already canceled context rejects raw asset", func(t *testing.T) {
+		dir := t.TempDir()
+
+		path, assetName := buildRawFile(t, dir, "payload")
+
+		dstPath := filepath.Join(dir, "staged")
+
+		err := extractBinary(newCtx(), path, assetName, "app", "linux", dstPath, DefaultMaxExtractedBytes)
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v, want context.Canceled", err)
+		}
+
+		assertNoStagingLeftovers(t, dir, "staged")
+	})
+
+	t.Run("cancellation mid-tar-stream leaves no partial output", func(t *testing.T) {
+		// A cancelingReader cancels the context once its first chunk has been
+		// served, so the next read through the cancellation wrapper must fail
+		// deterministically, without wall-clock synchronization.
+		tarBytes := buildTarBytes(t, []tarEntry{
+			{name: "app", content: strings.Repeat("p", 64<<10)},
+		}, false)
+
+		dstPath := filepath.Join(t.TempDir(), "staged")
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		src := &cancelingReader{r: bytes.NewReader(tarBytes), cancel: cancel}
+
+		err := extractFromTar(ctx, src, "app", dstPath)
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v, want context.Canceled", err)
+		}
+
+		if _, statErr := os.Stat(dstPath); !os.IsNotExist(statErr) {
+			t.Fatalf("staged file survived cancellation (stat err = %v)", statErr)
+		}
+	})
+}
+
+// cancelingReader serves one read from r, then cancels ctx, so the following
+// read through a ctx-checking wrapper observes the cancellation.
+type cancelingReader struct {
+	r      io.Reader
+	once   bool
+	cancel context.CancelFunc
+}
+
+// Read implements io.Reader.
+func (c *cancelingReader) Read(p []byte) (int, error) {
+	if !c.once {
+		c.once = true
+
+		return c.r.Read(p)
+	}
+
+	c.cancel()
+
+	return 0, context.Canceled
+}
+
+// The cancellation label keeps a context failure from reading like a plain
+// staging-write problem while keeping the context error findable.
+func TestExtractCancelErrorLabel(t *testing.T) {
+	dir := t.TempDir()
+
+	path, assetName := buildRawFile(t, dir, "payload")
+
+	liveCtx, cancel := context.WithCancel(context.Background())
+
+	cancel()
+
+	err := extractBinary(liveCtx, path, assetName, "app", "linux", filepath.Join(dir, "staged"), DefaultMaxExtractedBytes)
+	if err == nil || !strings.Contains(err.Error(), "extraction canceled") {
+		t.Fatalf("err = %v, want extraction canceled label", err)
+	}
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled in chain", err)
+	}
 }
