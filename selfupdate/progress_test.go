@@ -29,16 +29,6 @@ func (r *progressRecorder) record(p Progress) {
 	r.events = append(r.events, p)
 }
 
-func (r *progressRecorder) stages() []Stage {
-	stages := make([]Stage, 0, len(r.events))
-
-	for _, p := range r.events {
-		stages = append(stages, p.Stage)
-	}
-
-	return stages
-}
-
 func TestApplyWithProgressEndToEnd(t *testing.T) {
 	f := newUpdateFixture(t)
 
