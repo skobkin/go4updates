@@ -88,24 +88,30 @@ func zipDeclaredEntryCount(archivePath string) (n int64, ok bool) {
 		}
 
 		count := int64(binary.LittleEndian.Uint16(tail[i+zipEOCDTotalEntries:]))
+		dirSize := int64(binary.LittleEndian.Uint32(tail[i+12:]))
+		dirOffset := int64(binary.LittleEndian.Uint32(tail[i+16:]))
 
 		// A zip64 locator directly precedes the EOCD and points at a zip64
-		// EOCD record whose 64-bit count supersedes the 16-bit one.
+		// EOCD record whose 64-bit fields supersede the 32-bit ones — the
+		// count and the directory placement alike, so real zip64 archives
+		// (whose 32-bit fields carry 0xffffffff placeholders) are still
+		// sanity-checked against their true layout.
 		if i >= zip64LocatorLen && binary.LittleEndian.Uint32(tail[i-zip64LocatorLen:]) == zip64LocatorSignature {
-			if c, ok := zip64DeclaredEntryCount(f, tail[i-zip64LocatorLen+zip64LocatorEOCDOff:]); ok {
-				count = c
+			if c, s, o, ok := zip64EOCDFields(f, tail[i-zip64LocatorLen+zip64LocatorEOCDOff:]); ok {
+				count, dirSize, dirOffset = c, s, o
 			}
 		}
 
 		// Sanity-check the record the way archive/zip does before trusting
 		// anything from it, so junk inside a comment cannot smuggle in a
-		// count: the comment must span the rest of the tail, and the
-		// directory it describes must fit inside the file.
+		// count: the comment must span the rest of the tail, and the central
+		// directory must start at a non-negative offset once the
+		// prepended-data base is derived the way archive/zip derives it
+		// (directory end − directory size − directory offset).
 		dirEnd := info.Size() - tailLen + int64(i)
-		dirSize := int64(binary.LittleEndian.Uint32(tail[i+12:]))
 
 		if binary.LittleEndian.Uint16(tail[i+zipEOCDCommentLen:]) != uint16(len(tail)-i-zipEOCDLen) ||
-			dirSize > dirEnd || dirEnd-dirSize+int64(binary.LittleEndian.Uint32(tail[i+16:])) >= info.Size() {
+			dirEnd-dirSize-dirOffset < 0 {
 			return 0, false
 		}
 
@@ -115,34 +121,38 @@ func zipDeclaredEntryCount(archivePath string) (n int64, ok bool) {
 	return 0, false
 }
 
-// zip64DeclaredEntryCount reads the 64-bit total entry count from the zip64
-// EOCD record at the offset carried in locatorOff (an 8-byte little-endian
-// slice taken from a zip64 locator). ok is false when the offset is out of
-// range or the record there is not a zip64 EOCD.
-func zip64DeclaredEntryCount(f *os.File, locatorOff []byte) (int64, bool) {
+// zip64EOCDFields reads the 64-bit total entry count, central-directory
+// size, and central-directory offset from the zip64 EOCD record at the
+// offset carried in locatorOff (an 8-byte little-endian slice taken from a
+// zip64 locator). ok is false when the offset is out of range, the record
+// there is not a zip64 EOCD, or any field exceeds math.MaxInt64 — a
+// declared count of 2^63 and above must not survive the int64 conversion
+// as a negative value that slips past the caller's guard comparison.
+func zip64EOCDFields(f *os.File, locatorOff []byte) (count, dirSize, dirOffset int64, ok bool) {
 	off := binary.LittleEndian.Uint64(locatorOff)
 	if off > uint64(math.MaxInt64) {
-		return 0, false
+		return 0, 0, 0, false
 	}
 
 	rec := make([]byte, zip64EOCDLen)
 
 	if _, err := f.ReadAt(rec, int64(off)); err != nil {
-		return 0, false
+		return 0, 0, 0, false
 	}
 
 	if binary.LittleEndian.Uint32(rec) != zip64EOCDSignature {
-		return 0, false
+		return 0, 0, 0, false
 	}
 
-	dirSize := binary.LittleEndian.Uint64(rec[zip64EOCDDirSize:])
-	dirOffset := binary.LittleEndian.Uint64(rec[zip64EOCDDirOffset:])
+	countU := binary.LittleEndian.Uint64(rec[zip64EOCDTotalEntries:])
+	sizeU := binary.LittleEndian.Uint64(rec[zip64EOCDDirSize:])
+	offsetU := binary.LittleEndian.Uint64(rec[zip64EOCDDirOffset:])
 
-	if dirSize > math.MaxInt64 || dirOffset > math.MaxInt64 {
-		return 0, false
+	if countU > math.MaxInt64 || sizeU > math.MaxInt64 || offsetU > math.MaxInt64 {
+		return 0, 0, 0, false
 	}
 
-	return int64(binary.LittleEndian.Uint64(rec[zip64EOCDTotalEntries:])), true
+	return int64(countU), int64(sizeU), int64(offsetU), true
 }
 
 // DefaultMaxExtractedBytes bounds the size of the extracted executable when

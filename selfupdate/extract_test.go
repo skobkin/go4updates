@@ -673,6 +673,105 @@ func TestExtractZipDeclaredEntryFloodRejectedBeforeParsing(t *testing.T) {
 			t.Fatalf("err = %v, want ErrExtractedTooLarge for the EOCD-declared flood", err)
 		}
 	})
+
+	t.Run("an absurd zip64 count cannot bypass the guard", func(t *testing.T) {
+		dir := t.TempDir()
+
+		zip64 := make([]byte, 56)
+
+		binary.LittleEndian.PutUint32(zip64[0:], 0x06064b50) // zip64 EOCD signature
+		binary.LittleEndian.PutUint64(zip64[4:], 44)         // size of the remaining record
+		binary.LittleEndian.PutUint64(zip64[32:], 1<<63)     // >= 2^63: int64 conversion would go negative
+
+		loc := make([]byte, 20)
+
+		binary.LittleEndian.PutUint32(loc[0:], 0x07064b50) // zip64 locator signature
+		binary.LittleEndian.PutUint64(loc[8:], junkLen)    // zip64 EOCD offset
+		binary.LittleEndian.PutUint32(loc[16:], 1)         // total disks
+
+		eocd := make([]byte, 22)
+
+		binary.LittleEndian.PutUint32(eocd[0:], 0x06054b50) // EOCD signature
+		binary.LittleEndian.PutUint16(eocd[8:], 0xffff)     // entries on this disk
+		binary.LittleEndian.PutUint16(eocd[10:], 0xffff)    // total entries: the zip64 trigger
+
+		path := writeFlood(t, dir, zip64, loc, eocd)
+
+		dstPath := filepath.Join(dir, "staged")
+
+		err := extractBinary(t.Context(), path, "app_1.0.0_linux_amd64.zip", "app", "linux", dstPath, DefaultMaxExtractedBytes, nil)
+		if !errors.Is(err, ErrExtractedTooLarge) {
+			t.Fatalf("err = %v, want ErrExtractedTooLarge: the absurd zip64 count must fall back to the plain one, which still guards", err)
+		}
+	})
+
+	t.Run("a real archive over the entry limit is rejected", func(t *testing.T) {
+		dir := t.TempDir()
+
+		var buf bytes.Buffer
+
+		zw := zip.NewWriter(&buf)
+
+		for i := 0; i < maxArchiveEntries+1; i++ {
+			if _, err := zw.Create(fmt.Sprintf("pad-%04d/", i)); err != nil {
+				t.Fatalf("creating entry: %v", err)
+			}
+		}
+
+		if err := zw.Close(); err != nil {
+			t.Fatalf("closing zip: %v", err)
+		}
+
+		path := filepath.Join(dir, "real.zip")
+
+		if err := os.WriteFile(path, buf.Bytes(), 0o600); err != nil {
+			t.Fatalf("writing archive: %v", err)
+		}
+
+		dstPath := filepath.Join(dir, "staged")
+
+		err := extractBinary(t.Context(), path, "app_1.0.0_linux_amd64.zip", "app", "linux", dstPath, DefaultMaxExtractedBytes, nil)
+		if !errors.Is(err, ErrExtractedTooLarge) {
+			t.Fatalf("err = %v, want ErrExtractedTooLarge for a real %d-entry archive", err, maxArchiveEntries+1)
+		}
+	})
+
+	t.Run("a real archive's record passes the sanity check", func(t *testing.T) {
+		dir := t.TempDir()
+
+		var buf bytes.Buffer
+
+		zw := zip.NewWriter(&buf)
+
+		for i := 0; i < 3; i++ {
+			if _, err := zw.Create(fmt.Sprintf("pad-%04d/", i)); err != nil {
+				t.Fatalf("creating entry: %v", err)
+			}
+		}
+
+		if err := zw.Close(); err != nil {
+			t.Fatalf("closing zip: %v", err)
+		}
+
+		path := filepath.Join(dir, "real.zip")
+
+		if err := os.WriteFile(path, buf.Bytes(), 0o600); err != nil {
+			t.Fatalf("writing archive: %v", err)
+		}
+
+		// Regression: the sanity check used to derive the prepended-data
+		// base with the central-directory offset added instead of
+		// subtracted, which rejects every well-formed archive — making the
+		// pre-parse guard dead code and this check the proof it fires.
+		count, ok := zipDeclaredEntryCount(path)
+		if !ok {
+			t.Fatal("zipDeclaredEntryCount rejected a real archive written by archive/zip")
+		}
+
+		if count != 3 {
+			t.Fatalf("count = %d, want 3", count)
+		}
+	})
 }
 
 // The tar entry limit applies to every entry — regular files, directories,
