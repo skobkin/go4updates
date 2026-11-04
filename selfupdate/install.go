@@ -536,6 +536,22 @@ func (i *Installer) publishBackup(target, backup string) (created bool, err erro
 	return true, nil
 }
 
+// removeRetirable removes name, clearing a read-only attribute first when
+// present: Windows refuses to delete read-only files (DeleteFile fails
+// with ACCESS_DENIED), and backups and staged executables legitimately
+// carry the read-only mode of binaries installed with WithFileMode(0o555).
+// On Unix, where the permission bits of the file itself do not govern
+// removal, the extra chmod changes nothing. The lstat and the chmod are
+// best-effort: an uninspectable or unmodifiable file still attempts the
+// removal and reports its own error.
+func (i *Installer) removeRetirable(name string) error {
+	if info, err := i.lstatFn(name); err == nil && info.Mode().Perm()&0o200 == 0 {
+		_ = os.Chmod(name, info.Mode().Perm()|0o200)
+	}
+
+	return i.removeFn(name)
+}
+
 // Cleanup removes selfupdate artifacts around the target and recovers an
 // interrupted install where possible. It is best-effort: per-file failures
 // are collected and reported together, never fatal to the other steps.
@@ -561,8 +577,11 @@ func (i *Installer) publishBackup(target, backup string) (created bool, err erro
 // binary proves it starts, not that it is healthy — and never earlier,
 // because the backup is the only rollback material until then. On Windows,
 // removing a backup whose old process still runs fails with a sharing
-// violation; the error is collected and the removal retried successfully at
-// the next startup.
+// violation, and a read-only attribute (inherited from an executable
+// installed with [WithFileMode(0o555)]) makes a plain removal fail with
+// ACCESS_DENIED; Cleanup clears the attribute before removing, and a
+// sharing-violation error is collected and the removal retried
+// successfully at the next startup.
 //
 // ctx is checked between the steps: a canceled context stops the cleanup
 // and returns the cancellation error joined with the problems collected so
@@ -635,7 +654,7 @@ func (i *Installer) Cleanup(ctx context.Context) error {
 				continue
 			}
 
-			if err := i.removeFn(filepath.Join(dir, e.Name())); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			if err := i.removeRetirable(filepath.Join(dir, e.Name())); err != nil && !errors.Is(err, fs.ErrNotExist) {
 				problems = append(problems, fmt.Errorf("removing %s: %w", e.Name(), err))
 			}
 		}
@@ -650,7 +669,7 @@ func (i *Installer) Cleanup(ctx context.Context) error {
 	// failed recovery the backup is the only remaining copy of the
 	// executable and must survive for the next startup.
 	if statErr == nil || restored {
-		if err := i.removeFn(backup); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err := i.removeRetirable(backup); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			problems = append(problems, fmt.Errorf("removing backup %s: %w", backup, err))
 		}
 	}

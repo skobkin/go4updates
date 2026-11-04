@@ -313,11 +313,11 @@ func (u *Updater) apply(ctx context.Context, result updates.Result, onProgress f
 		}
 
 		if downloadPath != "" {
-			_ = os.Remove(downloadPath)
+			_ = u.installer.removeRetirable(downloadPath)
 		}
 
 		if stagedPath != "" {
-			_ = os.Remove(stagedPath)
+			_ = u.installer.removeRetirable(stagedPath)
 		}
 	}()
 
@@ -410,7 +410,7 @@ func (u *Updater) apply(ctx context.Context, result updates.Result, onProgress f
 	emit.finalize()
 
 	// The archive is consumed; free it before the rename dance.
-	_ = os.Remove(downloadPath)
+	_ = u.installer.removeRetirable(downloadPath)
 
 	downloadPath = ""
 

@@ -190,6 +190,62 @@ func TestApplyRefusesNonRegularTarget(t *testing.T) {
 	}
 }
 
+// A binary installed with WithFileMode(0o555) is read-only, so the backup
+// made of it by the NEXT update is read-only too. Windows refuses to delete
+// read-only files, so Cleanup clears the attribute before removing;
+// without that the stranded backup fails every future install with
+// ErrBackupExists until cleared manually.
+func TestCleanupRetiresReadOnlyBackup(t *testing.T) {
+	f := newUpdateFixture(t)
+
+	u, err := New(WithTargetPath(f.target), WithAppName(fixtureAppName), WithHTTPClient(f.srv.Client()), WithFileMode(0o555), WithForce())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// First install: the new binary is installed read-only.
+	if _, err := u.Apply(t.Context(), f.result()); err != nil {
+		t.Fatalf("first Apply: %v", err)
+	}
+
+	info, statErr := os.Lstat(f.target)
+	if statErr != nil {
+		t.Fatalf("stat target: %v", statErr)
+	}
+
+	if info.Mode().Perm()&0o200 != 0 {
+		t.Fatalf("installed mode is %v, want read-only (WithFileMode(0o555))", info.Mode())
+	}
+
+	// Retire the first backup so the second install is not blocked by it.
+	if err := u.Cleanup(t.Context()); err != nil {
+		t.Fatalf("Cleanup after the first install: %v", err)
+	}
+
+	// Second install: the read-only binary becomes the new backup.
+	applied, err := u.Apply(t.Context(), f.result())
+	if err != nil {
+		t.Fatalf("second Apply: %v", err)
+	}
+
+	info, statErr = os.Lstat(applied.Backup)
+	if statErr != nil {
+		t.Fatalf("stat backup: %v", statErr)
+	}
+
+	if info.Mode().Perm()&0o200 != 0 {
+		t.Fatalf("backup mode is %v, want the read-only mode of the previous executable", info.Mode())
+	}
+
+	if err := u.Cleanup(t.Context()); err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+
+	if _, statErr := os.Lstat(applied.Backup); statErr == nil {
+		t.Fatalf("read-only backup %s survived Cleanup", applied.Backup)
+	}
+}
+
 func TestApplyEndToEnd(t *testing.T) {
 	f := newUpdateFixture(t)
 	u, err := New(WithTargetPath(f.target), WithAppName(fixtureAppName), WithHTTPClient(f.srv.Client()))
