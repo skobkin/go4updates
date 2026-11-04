@@ -191,8 +191,8 @@ func (i *Installer) Install(ctx context.Context, stagedPath string) (backupPath 
 
 // checkBackupAbsent rejects the install while a backup from an earlier
 // unconfirmed install exists.
-func checkBackupAbsent(backup string) error {
-	_, statErr := os.Lstat(backup)
+func (i *Installer) checkBackupAbsent(backup string) error {
+	_, statErr := i.lstatFn(backup)
 
 	switch {
 	case statErr == nil:
@@ -208,7 +208,7 @@ func checkBackupAbsent(backup string) error {
 
 // installUnix is the Unix replacement sequence described on Installer.
 func (i *Installer) installUnix(ctx context.Context, stagedPath, target, backup string) (string, error) {
-	if err := checkBackupAbsent(backup); err != nil {
+	if err := i.checkBackupAbsent(backup); err != nil {
 		return "", err
 	}
 
@@ -216,7 +216,7 @@ func (i *Installer) installUnix(ctx context.Context, stagedPath, target, backup 
 		return "", err
 	}
 
-	_, statErr := os.Lstat(target)
+	_, statErr := i.lstatFn(target)
 
 	switch {
 	case statErr == nil:
@@ -293,7 +293,7 @@ func (i *Installer) installWindows(ctx context.Context, stagedPath, target, back
 	// existing destination, so without the guard the move-aside step would
 	// silently overwrite an unconfirmed backup and destroy the rollback
 	// material.
-	if err := checkBackupAbsent(backup); err != nil {
+	if err := i.checkBackupAbsent(backup); err != nil {
 		return "", err
 	}
 
@@ -301,7 +301,7 @@ func (i *Installer) installWindows(ctx context.Context, stagedPath, target, back
 		return "", err
 	}
 
-	_, statErr := os.Lstat(target)
+	_, statErr := i.lstatFn(target)
 
 	switch {
 	case statErr == nil:
@@ -586,13 +586,13 @@ func (i *Installer) Cleanup(ctx context.Context) error {
 	}
 
 	// 1. Recovery: restore the backup when the target is missing.
-	_, statErr := os.Lstat(target)
+	_, statErr := i.lstatFn(target)
 
 	restored := false
 
 	switch {
 	case errors.Is(statErr, fs.ErrNotExist):
-		if _, berr := os.Lstat(backup); berr == nil {
+		if _, berr := i.lstatFn(backup); berr == nil {
 			if rerr := i.renameFn(backup, target); rerr != nil {
 				problems = append(problems, fmt.Errorf("restoring %s: %w", backup, rerr))
 			} else {

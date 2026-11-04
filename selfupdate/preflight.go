@@ -79,7 +79,7 @@ func (i *Installer) checkInstallability(ctx context.Context) error {
 	// matters — including before the target check, so the Windows
 	// crash-recovery shape (target missing, backup present) is reported as
 	// the backup it is, not as a missing-target pass.
-	if err := checkBackupAbsent(target + BackupSuffix); err != nil {
+	if err := i.checkBackupAbsent(target + BackupSuffix); err != nil {
 		return err
 	}
 
