@@ -558,7 +558,10 @@ or lying payloads instead of filling memory or disk. The extraction bound
 covers tar-family archives as a whole (the stream must be read through) and
 zip archives in the selected member only.
 
-**Replacement differs by platform.**
+**Replacement differs by platform.** On both of them, a target that exists
+but is not a regular file — a directory, symlink, or device node — is
+refused with `ErrTargetNotRegular` instead of being replaced (the same
+check `CheckInstallability` reports up front).
 
 - *Unix*: the previous binary is preserved under the backup name before the
   new one takes it with a single rename, so the target path always refers to a
