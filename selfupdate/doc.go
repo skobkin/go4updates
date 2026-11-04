@@ -30,6 +30,38 @@
 // verification and should only be used when the transport itself is fully
 // trusted.
 //
+// # Progress reporting
+//
+// [Updater.ApplyWithProgress] reports the pipeline as typed [Progress]
+// events: one transition per stage ([StageDownloading] through
+// [StageCompleted]), throttled intermediate byte events, one exact final
+// byte event per successfully completed stage, and a single completion
+// event. A Total of zero means the total is unknown — consumers must not
+// derive percentages or ETAs from it; a stage is determinate once any of
+// its events carries a nonzero Total. Download totals come from the actual
+// response; verification byte counts measure what the verifier actually
+// consumed (determinate for the built-in checksum verifier, honestly
+// indeterminate for custom [Verifier] implementations).
+//
+// The callback runs synchronously on the calling goroutine while the
+// Updater lifecycle lock is held: it must not call Apply, ApplyWithProgress,
+// or Cleanup on the same Updater, and it must not block. The
+// [StageInstalling] transition is the boundary after which a UI must stop
+// offering cancellation; the outcome of a canceled install is read from
+// the returned error (see [ErrReplaced]), never from progress events.
+//
+// # Installation preflight
+//
+// [Updater.CheckInstallability] reports, best effort and advisory, whether
+// an update could plausibly start: an existing unconfirmed backup, an
+// unusable target ([ErrTargetNotRegular], [ErrTargetNotExecutable]), and a
+// staging-and-rename probe of the target directory. It never modifies the
+// target or the backup, removes every probe file, and takes the Updater
+// lifecycle lock, so it waits for a concurrent Apply or Cleanup rather
+// than racing one — call it off the UI thread. A nil error is not a
+// guarantee that Apply will succeed; on Windows in particular it cannot
+// prove that moving the running executable aside will succeed.
+//
 // # Replacement guarantees
 //
 // On Unix the target path is replaced atomically: the previous executable is

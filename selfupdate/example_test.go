@@ -159,6 +159,92 @@ func updateConfirmedByUser(string) bool {
 	return false
 }
 
+// ExampleUpdater_ApplyWithProgress reports pipeline progress to a UI or
+// CLI while the update installs. Byte events are throttled; stage
+// transitions and final events are always delivered. A Total of zero
+// means the stage's total is unknown — the display switches to an
+// indeterminate indicator instead of guessing a percentage.
+func ExampleUpdater_ApplyWithProgress() {
+	source, err := github.New("example-org/example-app")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	checker := updates.NewChecker(updates.CheckerOptions{})
+
+	result, err := checker.Check(context.Background(), updates.Target{
+		CurrentVersion: "1.2.2",
+		Source:         source,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if result.Status != updates.StatusUpdateAvailable {
+		log.Println("no update available")
+
+		return
+	}
+
+	updater, err := selfupdate.New(selfupdate.WithAppName("example-app"))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	applied, err := updater.ApplyWithProgress(context.Background(), result, func(p selfupdate.Progress) {
+		switch p.Stage {
+		case selfupdate.StageDownloading, selfupdate.StageVerifying, selfupdate.StageExtracting:
+			if p.Total == 0 {
+				log.Printf("%s: %d bytes (total unknown)", p.Stage, p.Current)
+
+				return
+			}
+
+			log.Printf("%s: %d of %d bytes", p.Stage, p.Current, p.Total)
+
+		default:
+			// StageInstalling: stop offering cancellation from here on.
+			// StageCompleted: the update went through.
+			log.Printf("%s", p.Stage)
+		}
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Printf("installed %s; restart to run it (previous binary kept at %s)",
+		applied.Version, applied.Backup)
+}
+
+// ExampleUpdater_CheckInstallability runs the advisory preflight before
+// offering the update: an existing unconfirmed backup, an unusable target,
+// or an unwritable target directory disables the action up front instead
+// of failing after the user committed to it. The check may wait for a
+// concurrent update on the same Updater, so call it off the UI thread.
+func ExampleUpdater_CheckInstallability() {
+	updater, err := selfupdate.New(selfupdate.WithAppName("example-app"))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if err := updater.CheckInstallability(context.Background()); err != nil {
+		switch {
+		case errors.Is(err, selfupdate.ErrBackupExists):
+			log.Println("an unconfirmed previous update exists; restart and confirm it first")
+
+		case errors.Is(err, selfupdate.ErrTargetNotRegular), errors.Is(err, selfupdate.ErrTargetNotExecutable):
+			log.Println("the installation target cannot be replaced:", err)
+
+		default:
+			log.Println("self-update is not available in this environment:", err)
+		}
+
+		return
+	}
+
+	fmt.Println("self-update is available")
+}
+
 // ed25519Verifier is a custom [selfupdate.Verifier] checking a detached
 // ed25519 signature published as a sibling ".sig" asset over the SHA-256
 // digest of the downloaded archive. Signature verification authenticates

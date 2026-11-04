@@ -433,6 +433,107 @@ for event := range events {
 }
 ```
 
+### Progress reporting
+
+`ApplyWithProgress` reports the pipeline to a UI or CLI without pulling any
+UI dependency into the module:
+
+```go
+applied, err := updater.ApplyWithProgress(ctx, result, func(p selfupdate.Progress) {
+    switch p.Stage {
+    case selfupdate.StageDownloading, selfupdate.StageVerifying, selfupdate.StageExtracting:
+        if p.Total == 0 {
+            fmt.Printf("%s: %d bytes (total unknown)\n", p.Stage, p.Current)
+
+            return
+        }
+
+        fmt.Printf("%s: %d of %d bytes\n", p.Stage, p.Current, p.Total)
+
+    default:
+        fmt.Printf("%s\n", p.Stage)
+    }
+})
+```
+
+Each event carries the stage, the release asset file name, and byte counts.
+The stream per successful update is one transition event per stage
+(downloading, verifying, extracting, installing, completed), intermediate
+byte events during the byte-carrying stages, one exact final byte event per
+completed stage, and a single `StageCompleted` at the end. A failed stage
+emits no final event and no later stages; the returned error is the
+authoritative outcome, and `StageCompleted` is never reported for a failed
+update — `ErrReplaced` failures included.
+
+Byte-count contract: a `Total` of zero means the total is *unknown* — never
+derive percentages or ETAs from it. A stage is determinate once any of its
+events carries a nonzero `Total`, which is the signal an indeterminate
+progress display switches on. Download totals come from the actual HTTP
+response, never from release metadata. Verification byte counts measure what
+the verifier actually consumed through its input: the built-in checksum
+verifier reads the whole file, so its progress is determinate; a custom
+`Verifier` may read any part of its input, so its events stay indeterminate
+and its final event reports measured bytes without implying completion.
+Extraction totals are the archive member's declared size where the format
+declares one (zip, tar members), zero otherwise.
+
+Intermediate byte events are throttled (roughly one per 150 ms and never for
+an unchanged count); stage transitions, the first byte observation, and final
+events are always delivered immediately, with exact counts. The callback runs
+synchronously on the goroutine calling `ApplyWithProgress` while the
+Updater-wide update lock is held: it must not call `Apply`, `ApplyWithProgress`,
+or `Cleanup` on the same `Updater` (the lock is already taken — deadlock), and
+it must not block. Cancellation works throughout the pre-installation stages;
+the `StageInstalling` transition is the boundary after which a UI must stop
+offering cancellation — the installer may still abort cleanly just before the
+replacement, but it may also already have taken effect (`errors.Is(err,
+selfupdate.ErrReplaced)`), and canceling never implies undoing it.
+
+### Installation preflight
+
+`CheckInstallability` reports — best effort and advisory — whether an update
+could plausibly start, without applying anything. Use it to disable an Update
+action when the environment cannot take one:
+
+```go
+if err := updater.CheckInstallability(ctx); err != nil {
+    switch {
+    case errors.Is(err, selfupdate.ErrBackupExists):
+        // An unconfirmed previous update exists: restart and confirm it first.
+    case errors.Is(err, selfupdate.ErrTargetNotRegular),
+        errors.Is(err, selfupdate.ErrTargetNotExecutable):
+        // The target cannot be replaced by the updater.
+    default:
+        // Not installable here: permission or filesystem problem (the
+        // underlying cause stays in the chain for errors.Is).
+    }
+}
+```
+
+Checked in order, returning the first finding: a canceled context; an
+existing unconfirmed backup (`ErrBackupExists`); the target itself
+(`ErrTargetNotRegular` for directories and symlinks that cannot be resolved,
+`ErrTargetNotExecutable` on Unix when the target has no execute bits and no
+mode is forced with `WithFileMode` — a missing target passes, fresh installs
+are supported); and a staging probe that creates, renames onto a
+verified-free name, and removes two unique files in the target directory,
+proving the create-and-rename capability the replacement needs. Write
+permission on the executable itself is deliberately never required: on Unix,
+directory permissions govern replacement, so a read-only executable is
+perfectly replaceable.
+
+The probe never touches the target or the backup, removes every file it
+created, and reports failing removals instead of silently passing with
+leftovers. The check takes the Updater-wide update lock, so it waits for a
+concurrent `Apply` or `Cleanup` instead of racing it — call it off the UI
+thread. A nil error is not a guarantee that `Apply` will succeed: preflight
+cannot predict download, verification, or extraction failures, and on Windows
+it cannot prove that moving the *running* executable aside will succeed — a
+directory probe does not test the file locks of a running binary. It never
+attempts privilege escalation and is not a substitute for application or
+distribution policy (package-managed installs may be writable only under
+elevated privileges).
+
 ### Guarantees
 
 **Verification is mandatory.** Updates whose checksum asset is missing,
@@ -550,12 +651,65 @@ Limitations worth knowing: Go does not report which ARM variant a binary was
 built for, so publishers shipping separate `armv6` and `armv7` assets need a
 custom matcher, and unmapped platforms (`freebsd`, `riscv64`, …) never match.
 
-### Making self-update opt-in at build time
+### Making self-update optional at build time
 
 The library ships no build tags or ldflags variables — activation policy
 belongs to the application. Two common patterns:
 
-1. A variable set at link time, runtime-off by default:
+1. **A build tag that removes the wiring** (recommended for distribution
+   packaging): the default build wires self-update in; packaging builds
+   exclude it entirely.
+
+   ```bash
+   go build -tags no_selfupdate
+   ```
+
+   The application keeps its code identical in both builds and swaps only
+   the wiring file:
+
+   ```go
+   // updater.go — compiled by default builds.
+
+   //go:build !no_selfupdate
+
+   func applySelfUpdate(ctx context.Context, result updates.Result) error {
+       updater, err := selfupdate.New(selfupdate.WithAppName(appName))
+       if err != nil {
+           return err
+       }
+
+       if err := updater.CheckInstallability(ctx); err != nil {
+           return fmt.Errorf("self-update is unavailable: %w", err)
+       }
+
+       _, err = updater.ApplyWithProgress(ctx, result, reportProgress)
+
+       return err
+   }
+   ```
+
+   ```go
+   // updater_stub.go — compiled by -tags no_selfupdate builds; the
+   // selfupdate package is not imported at all, so the binary carries no
+   // self-update machinery.
+
+   //go:build no_selfupdate
+
+   func applySelfUpdate(_ context.Context, result updates.Result) error {
+       if result.Status != updates.StatusUpdateAvailable {
+           return nil
+       }
+
+       return errors.New("self-update is disabled in this build")
+   }
+   ```
+
+   A complete compilable example lives at
+   `examples/selfupdate-build-tags/`, including a test that keeps the
+   tagged variant building.
+
+2. A variable set at link time, runtime-off by default — for builds that
+   must contain the feature but activate it per deployment:
 
    ```go
    var enableSelfUpdate string // -ldflags "-X main.enableSelfUpdate=true"
@@ -565,13 +719,6 @@ belongs to the application. Two common patterns:
            startSelfUpdater()
        }
    }
-   ```
-
-2. A build-tagged file, so the code is absent from package-manager builds
-   entirely (recommended for distribution packaging):
-
-   ```go
-   //go:build selfupdate
    ```
 
 ## Release-note formatting
@@ -643,7 +790,7 @@ requirements arrive: built-in signature schemes beyond the `Verifier`
 extension point (ed25519, minisign, cosign), `.xz`/`.zst`/`.7z`/`.bz2`
 archives, macOS universal binaries, ARM variant disambiguation beyond the
 alias class, delta updates, automatic restart after update, automatic updates
-from watcher events, download progress reporting and resume, checksum digests
+from watcher events, download resume, checksum digests
 embedded in `updates.Asset`, and a public rollback API.
 
 ## License
