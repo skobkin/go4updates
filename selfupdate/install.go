@@ -592,6 +592,16 @@ func (i *Installer) removeRetirable(name string) error {
 // sharing-violation error is collected and the removal retried
 // successfully at the next startup.
 //
+// Cleanup coordinates with an [Updater] through the Updater lifecycle,
+// but on its own it takes only the Installer mutex: an application
+// holding a separately constructed [Installer] for the same target can
+// have Cleanup remove the staging files of an [Updater.Apply] still in
+// progress — the download and extracted-executable temps live in the
+// same directory and carry the staging prefixes Cleanup sweeps. Route
+// cleanup for an Updater-managed target through [Updater.Cleanup], which
+// waits for a running pipeline, or keep direct-Installer cleanup
+// strictly sequential with any running update.
+//
 // ctx is checked between the steps: a canceled context stops the cleanup
 // and returns the cancellation error joined with the problems collected so
 // far, keeping everything not yet processed — a canceled run never retires
