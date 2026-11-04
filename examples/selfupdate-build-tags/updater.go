@@ -12,12 +12,15 @@ import (
 )
 
 // applySelfUpdate is the enabled wiring: standalone builds install updates
-// through the selfupdate package. The preflight disables the action when
-// the environment cannot take an update, and progress goes to the log.
+// through the selfupdate package when the user explicitly requests one
+// (--self-update; see main.go). The preflight disables the action when the
+// environment cannot take an update, and progress goes to the log.
 //
 // The default build (no tags) compiles this file.
 func applySelfUpdate(ctx context.Context, result updates.Result) error {
 	if result.Status != updates.StatusUpdateAvailable {
+		log.Printf("already running %s; nothing to update", result.CurrentVersion)
+
 		return nil
 	}
 

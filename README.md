@@ -694,22 +694,25 @@ belongs to the application. Two common patterns:
    ```go
    // updater_stub.go — compiled by -tags no_selfupdate builds; the
    // selfupdate package is not imported at all, so the binary carries no
-   // self-update machinery.
+   // self-update machinery. The application stays fully usable while a
+   // release is available; an explicit self-update request reports the
+   // feature as intentionally unavailable.
 
    //go:build no_selfupdate
 
-   func applySelfUpdate(_ context.Context, result updates.Result) error {
-       if result.Status != updates.StatusUpdateAvailable {
-           return nil
-       }
-
-       return errors.New("self-update is disabled in this build")
+   func applySelfUpdate(_ context.Context, _ updates.Result) error {
+       return errors.New("self-update is disabled in this build (built with -tags no_selfupdate); install updates through your package manager")
    }
    ```
 
+   Whichever variant is built, installing is an explicit application
+   decision (a `--self-update` flag in the example), never a startup side
+   effect: startup only checks for a release and says so.
+
    A complete compilable example lives at
    `examples/selfupdate-build-tags/`, including a test that keeps the
-   tagged variant building.
+   tagged variant building and a tagged test run exercising the disabled
+   behavior.
 
 2. A variable set at link time, runtime-off by default — for builds that
    must contain the feature but activate it per deployment:

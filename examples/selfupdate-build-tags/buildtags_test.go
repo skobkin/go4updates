@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	updates "github.com/skobkin/go4updates"
 )
 
 // TestNoSelfupdateVariantCompiles builds the -tags no_selfupdate variant:
@@ -53,5 +55,52 @@ func TestNoSelfupdateKeepsPackageOutOfBuildGraph(t *testing.T) {
 
 	if !strings.Contains(string(with), "go4updates/selfupdate") {
 		t.Fatalf("sanity: the default build graph lost the selfupdate package, so the exclusion check above could never fire:\n%s", with)
+	}
+}
+
+// Installing is an explicit application decision, so the --self-update
+// flag scan is pinned: normal startup (no flag, unrelated flags) must
+// never trigger the wiring.
+func TestSelfUpdateRequested(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want bool
+	}{
+		{nil, false},
+		{[]string{"--verbose"}, false},
+		{[]string{"--self-updates"}, false},
+		{[]string{"--self-update"}, true},
+		{[]string{"serve", "--self-update"}, true},
+	} {
+		if got := selfUpdateRequested(tc.args); got != tc.want {
+			t.Errorf("selfUpdateRequested(%q) = %v, want %v", tc.args, got, tc.want)
+		}
+	}
+}
+
+// The enabled wiring must stay a no-op on an up-to-date result: the status
+// gate runs before any updater work, so an explicit request on a current
+// build reports success without network or filesystem activity.
+func TestEnabledWiringUpToDateIsNoop(t *testing.T) {
+	err := applySelfUpdate(t.Context(), updates.Result{
+		CurrentVersion: "1.0.0",
+		Status:         updates.StatusUpToDate,
+	})
+	if err != nil {
+		t.Fatalf("applySelfUpdate on an up-to-date result: %v", err)
+	}
+}
+
+// The disabled variant's wiring is compiled out of the default test
+// binary, so its informative-error contract is exercised through a tagged
+// test run of the same package (see stub_test.go) — keeping both the
+// enabled and the disabled behavior covered by the ordinary suite.
+func TestNoSelfupdateVariantBehavior(t *testing.T) {
+	// Constant arguments only: the go tool is resolved from PATH.
+	cmd := exec.Command("go", "test", "-tags", "no_selfupdate", "-run", "^TestDisabledStubReportsInformativeError$", ".")
+	cmd.Dir = "."
+
+	if combined, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("running the no_selfupdate behavior tests: %v\n%s", err, combined)
 	}
 }
