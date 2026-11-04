@@ -247,6 +247,34 @@ func TestCleanupRetiresReadOnlyBackup(t *testing.T) {
 	}
 }
 
+// WithMaxExtractedBytes must both validate its argument and actually wire
+// the limit into the pipeline: the decompression-bomb tests exercise
+// extractBinary directly, so before this test the option layer itself —
+// validation and plumbing — was never exercised.
+func TestWithMaxExtractedBytesOption(t *testing.T) {
+	f := newUpdateFixture(t)
+
+	for _, n := range []int64{0, -1} {
+		if _, err := New(WithTargetPath(f.target), WithAppName(fixtureAppName), WithMaxExtractedBytes(n)); err == nil {
+			t.Fatalf("New accepted WithMaxExtractedBytes(%d)", n)
+		}
+	}
+
+	u, err := New(WithTargetPath(f.target), WithAppName(fixtureAppName), WithHTTPClient(f.srv.Client()), WithMaxExtractedBytes(4))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// The fixture's extracted member is larger than 4 bytes; zip bounds the
+	// selected member while streaming.
+	_, err = u.Apply(t.Context(), f.result())
+	if !errors.Is(err, ErrExtractedTooLarge) {
+		t.Fatalf("err = %v, want ErrExtractedTooLarge under a 4-byte extraction limit", err)
+	}
+
+	assertNoStagingLeftovers(t, f.dir, fixtureAppName)
+}
+
 func TestApplyEndToEnd(t *testing.T) {
 	f := newUpdateFixture(t)
 	u, err := New(WithTargetPath(f.target), WithAppName(fixtureAppName), WithHTTPClient(f.srv.Client()))
