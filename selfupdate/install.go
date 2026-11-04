@@ -216,11 +216,17 @@ func (i *Installer) installUnix(ctx context.Context, stagedPath, target, backup 
 		return "", err
 	}
 
-	_, statErr := i.lstatFn(target)
+	info, statErr := i.lstatFn(target)
 
 	switch {
 	case statErr == nil:
-		// Preserve the old binary before the new one takes the name.
+		// Preserve the old binary before the new one takes the name — but
+		// only a regular file, per the contract on [ErrTargetNotRegular]:
+		// replacing a directory, symlink, or device node would displace it
+		// to the backup name instead of the updater failing as documented.
+		if !info.Mode().IsRegular() {
+			return "", fmt.Errorf("%w: %s", ErrTargetNotRegular, target)
+		}
 
 	case errors.Is(statErr, fs.ErrNotExist):
 		// Nothing to preserve: install to the fresh path.
@@ -301,10 +307,17 @@ func (i *Installer) installWindows(ctx context.Context, stagedPath, target, back
 		return "", err
 	}
 
-	_, statErr := i.lstatFn(target)
+	info, statErr := i.lstatFn(target)
 
 	switch {
 	case statErr == nil:
+		// A non-regular target is refused before anything is moved aside
+		// (see [ErrTargetNotRegular]): the rename below would otherwise
+		// displace a directory or special file to the backup name.
+		if !info.Mode().IsRegular() {
+			return "", fmt.Errorf("%w: %s", ErrTargetNotRegular, target)
+		}
+
 		// Move the running executable aside; deletion is never attempted.
 		if err := i.renameFn(target, backup); err != nil {
 			return "", fmt.Errorf("go4updates/selfupdate: moving %s aside: %w", target, err)

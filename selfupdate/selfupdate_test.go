@@ -134,6 +134,62 @@ func assertNoStagingLeftovers(t *testing.T, dir, base string) {
 	}
 }
 
+// Apply must refuse to replace a target that is not a regular file: the
+// contract documented on [ErrTargetNotRegular] holds for the install path,
+// not only for CheckInstallability. Regression: Install used to dispatch
+// on existence only, so on Windows a directory at the target path was moved
+// aside as the "backup" and silently replaced by the new binary.
+func TestApplyRefusesNonRegularTarget(t *testing.T) {
+	f := newUpdateFixture(t)
+
+	for _, tc := range []struct {
+		name    string
+		absent  func()
+		restore func()
+	}{
+		{"directory", func() {
+			_ = os.Remove(f.target)
+			_ = os.Mkdir(f.target, 0o755)
+		}, func() {
+			_ = os.Remove(f.target)
+			_ = os.Mkdir(f.target, 0o755)
+		}},
+		{"symlink", func() {
+			_ = os.Remove(f.target)
+			_ = os.Symlink(filepath.Join(f.dir, "elsewhere"), f.target)
+		}, func() {
+			_ = os.Remove(f.target)
+			_ = os.Symlink(filepath.Join(f.dir, "elsewhere"), f.target)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.absent()
+
+			u, err := New(WithTargetPath(f.target), WithAppName(fixtureAppName), WithHTTPClient(f.srv.Client()))
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+
+			_, err = u.Apply(t.Context(), f.result())
+			if !errors.Is(err, ErrTargetNotRegular) {
+				t.Fatalf("err = %v, want ErrTargetNotRegular for a %s target", err, tc.name)
+			}
+
+			info, statErr := os.Lstat(f.target)
+			if statErr != nil {
+				t.Fatalf("target was touched by the refused install: %v", statErr)
+			}
+
+			if tc.name == "directory" && !info.IsDir() {
+				t.Fatalf("target is %v, want the untouched directory", info.Mode())
+			}
+
+			assertNoStagingLeftovers(t, f.dir, fixtureAppName)
+			tc.restore()
+		})
+	}
+}
+
 func TestApplyEndToEnd(t *testing.T) {
 	f := newUpdateFixture(t)
 	u, err := New(WithTargetPath(f.target), WithAppName(fixtureAppName), WithHTTPClient(f.srv.Client()))
