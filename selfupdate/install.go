@@ -411,7 +411,7 @@ func (i *Installer) prepareStaged(stagedPath, target string) error {
 		}
 	}
 
-	if runtime.GOOS != "windows" && mode.Perm()&0o111 == 0 {
+	if runtime.GOOS != "windows" && !unixModeHasExecBits(mode) {
 		return fmt.Errorf("go4updates/selfupdate: %s has mode %v, which has no execute bit: the installed binary could not be run; set executable permission bits with WithFileMode or chmod the target", target, mode)
 	}
 

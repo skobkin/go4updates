@@ -105,6 +105,15 @@ func WithTargetPath(path string) Option {
 	}
 }
 
+// unixModeHasExecBits reports whether mode carries at least one execute
+// bit — the Unix requirement for a runnable binary. The predicate is
+// shared so the rule stays identical between what [WithFileMode] accepts,
+// what the install enforces on the inherited target mode, and what
+// [Updater.CheckInstallability] requires of the target.
+func unixModeHasExecBits(mode fs.FileMode) bool {
+	return mode.Perm()&0o111 != 0
+}
+
 // WithFileMode sets the permission bits applied to the installed
 // executable. Without it, a replaced target keeps the mode of the binary it
 // replaces, and a newly created target is installed with 0755.
@@ -121,7 +130,7 @@ func WithFileMode(mode fs.FileMode) Option {
 			return fmt.Errorf("file mode must be non-zero permission bits, got %v", mode)
 		}
 
-		if runtime.GOOS != "windows" && mode.Perm()&0o111 == 0 {
+		if runtime.GOOS != "windows" && !unixModeHasExecBits(mode) {
 			return fmt.Errorf("file mode %v has no execute bit: the installed binary could not be run; read-only executables like 0555 are allowed", mode)
 		}
 

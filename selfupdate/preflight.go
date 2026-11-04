@@ -96,7 +96,7 @@ func (i *Installer) checkInstallability(ctx context.Context) error {
 	case !info.Mode().IsRegular():
 		return fmt.Errorf("%w: %s", ErrTargetNotRegular, target)
 
-	case runtime.GOOS != "windows" && !i.fileModeSet && info.Mode().Perm()&0o111 == 0:
+	case runtime.GOOS != "windows" && !i.fileModeSet && !unixModeHasExecBits(info.Mode()):
 		return fmt.Errorf("%w: %s has mode %v, which has no execute bit: the installed binary could not be run; set executable permission bits with WithFileMode or chmod the target",
 			ErrTargetNotExecutable, target, info.Mode())
 	}
