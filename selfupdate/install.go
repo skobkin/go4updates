@@ -259,8 +259,14 @@ func (i *Installer) installUnix(ctx context.Context, stagedPath, target, backup 
 			// folded into the error instead of being dropped, so a retry
 			// blocked by ErrBackupExists can be explained.
 			if rmErr := i.removeFn(backup); rmErr != nil {
-				return "", fmt.Errorf("go4updates/selfupdate: install canceled: %w (removing the attempt backup %s also failed: %v)",
-					err, backup, rmErr)
+				// The removal cause stays in the chain as its own branch, so
+				// errors.Is still finds fs.ErrPermission and friends behind
+				// it when a retry is blocked by ErrBackupExists.
+				return "", errors.Join(
+					fmt.Errorf("go4updates/selfupdate: install canceled: %w (removing the attempt backup %s also failed)",
+						err, backup),
+					rmErr,
+				)
 			}
 		}
 
@@ -273,8 +279,11 @@ func (i *Installer) installUnix(ctx context.Context, stagedPath, target, backup 
 		// pre-existing backup never reaches this path (checked above).
 		if backupCreated {
 			if rmErr := i.removeFn(backup); rmErr != nil {
-				return "", fmt.Errorf("go4updates/selfupdate: replacing %s: %w (removing the attempt backup %s also failed: %v)",
-					target, err, backup, rmErr)
+				return "", errors.Join(
+					fmt.Errorf("go4updates/selfupdate: replacing %s: %w (removing the attempt backup %s also failed)",
+						target, err, backup),
+					rmErr,
+				)
 			}
 		}
 
